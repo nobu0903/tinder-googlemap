@@ -14,7 +14,14 @@ export const MOCK_SPOT = {
   // category: "Rich Miso Ramen",
   priceRange: "1000-2000",
   isOpen: true,
-  imageUrl:
-    "https://images.unsplash.com/photo-1569718212165-3a8278d5f624?auto=format&fit=crop&w=1200&q=80",
-  imageAlt: "Rich miso ramen bowl with chashu and soft-boiled egg",
+  images: [
+    { src: "/ramens/ramen1.jpg", alt: "濃厚味噌ラーメン" },
+    { src: "/ramens/ramen2.jpg", alt: "豚骨ラーメン" },
+    { src: "/ramens/ramen3.jpg", alt: "塩ラーメン" },
+    { src: "/ramens/ramne4.jpg", alt: "醤油ラーメン" },
+    { src: "/ramens/ramen5.jpg", alt: "担々麺" },
+    { src: "/ramens/ramen6.jpg", alt: "煮干しラーメン" },
+    { src: "/ramens/ramen7.jpg", alt: "つけ麺" },
+    { src: "/ramens/ramen8.jpg", alt: "ダブルスープラーメン" },
+  ],
 } as const;
