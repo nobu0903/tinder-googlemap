@@ -1,0 +1,34 @@
+---
+description: Sitemap, Navigation Architecture, and Micro-UX Swipe Card Layout Specifications.
+globs: app/**/*.tsx, components/**/*.tsx, next.config.ts4
+alwaysApply: false
+---
+
+# VibeLoop - Architecture & Layout Specifications
+
+## 1. Sitemap & Routing (3-Tab Navigation)
+- `/` or `/swipe` (🔥 SWIPE): 初期表示。カードが無限に出るメインの狩場（`ChatGPT Image Jun 20, 2026, 11_26_15 PM.png` 準拠）。
+- `/explore` (🔍 EXPLORE): 「YouTube URL入力欄」、「Explore by Theme（テーマ別タイル群）」が並ぶ欲望切り替え画面（`ChatGPT Image Jun 20, 2026, 11_39_46 PM.png` 準拠）。
+- `/collection` (📁 COLLECTION): 右スワイプした店がズラッと並ぶ戦利品部屋。最下部に固定された巨大な「Export to Google Maps」ボタンが絶対的ゴール（`ChatGPT Image Jun 20, 2026, 11_53_11 PM.png` 準拠）。
+
+## 2. Swipe Card Layout Specifications (最重要・お前案完全固定)
+Google Mapsの横長写真（16:10 / 4:3）の余白とユーザーの意思決定速度を最大化するため、以下の構造を絶対厳守すること。
+
+### A. 写真とグラデーションハック（Netflix/Spotify手法）
+- **全面写真配置**: カードの上部から全体にかけて、横長写真をトリミングせずにシズル感を最大化して配置。
+- **ボトムグラデーション**: 写真の下部に `transparent` から `black 70%` へ変化する線形グラデーション（Linear Gradient）を必ず敷くこと。これにより、写真の視認性と白文字テキストの可読性を100%両立させる。
+
+### B. 直感的なインフォメーションスタック（写真下部オーバーレイ）
+ユーザーが最初の1秒で「美味そう×近い×高評価×今行ける」を判断できるよう、テキストの無駄な説明文（プロポーズ文等）は**【完全削除】**し、以下のスタックのみをボトムオーバーレイとして配置する。
+
+1. **店舗名（Store Name）**: 圧倒的に大きく太いフォントで配置。最優先で脳に突き刺すサイズ。
+2. **Social Proof & 距離ライン**: 店名の直下に、視線の流れ（店名→距離→判断）に沿って以下を1行でタイトに配置する。
+   - `⭐ 4.8 (328) • 📍 0.5 km • 🍜 カテゴリーバッジ • ¥¥ (価格帯)`
+3. **リアルタイムステータス**: 夜中の衝動をブーストするため、`🟢 Open Now`（または営業時間状態）を視覚的に目立たせて配置する。
+
+### C. 大胆なTinder型ボタンレイアウト（Button Card Overlay）
+- **サイズの大幅拡張**: 従来の小さなボタンを廃止し、押しやすさを担保するため **80px 〜 96px** の超大型サイズで実装すること。
+- **カードへのオーバーラップ**: ボタンをカードの下の余白に逃がさず、**カードの下端をまたぐように完全に重ねて（Overlap）配置**すること。プロダクト感を一気に高める。
+- **強烈なコントラストの2色**:
+  - 左：Dislike (✕) ➔ 控えめなダークグレー、または境界線のみのローコントラスト
+  - 右：Like (♥) ➔ 鮮烈なグラデーションオレンジ（高コントラスト）

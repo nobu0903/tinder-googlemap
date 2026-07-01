@@ -1,0 +1,24 @@
+---
+description: Product Requirements Document (PRD), core psychology, and UI/UX design tokens based on provided mockups.
+globs: app/**/*.tsx, components/**/*.tsx
+alwaysApply: false
+---
+
+# VibeLoop - Product Requirements & UX Tokens
+
+## 1. Core Mission
+- **未知の場所をめくるゲーム性**: 「1枚ずつ、まだ行ったことがない未知の場所をめくる」という摩擦（ゲーム性）を挟み、次のカードへの妄想とスロットマシン効果（ドーパミン分泌）を最大化する。
+- **SNS動画のペイン解消**: YouTubeやインスタの動画を見た後に、場所を1個ずつ調べるのが絶望的にめんどくさいというペインを、URL入力一発で解決する。
+
+## 2. Feed Content Balance
+- フィードに流れるカードの割合は以下の黄金比率を厳守すること：
+  - **3割：定番のスポット**（誰もが知る王道・ vanilla な名店もしっかりカバー）
+  - **7割：その他（エモい・動機ベースのテーマスポット）**（欲望をダイレクトに突くディープな場所）
+
+## 3. Visual & Style Rules (ラフ画像準拠)
+- **Color Stack (60-30-10 Rule)**:
+  - 60% Dominant: Premium Dark/Midnight Black (`#0A0A0A`〜`#111111`) - 写真とネオンを引き立たせる漆黒
+  - 30% Secondary: Pure White (`#FFFFFF`) - テキスト、および深みのあるウォームグレー・ダークブラウンの構造体
+  - 10% Accent: Vivid Orange/Chilli Red (`#FF4500`〜`#FF5A1A`) - 操作系・アクティブ状態の視線ハック
+- **モバイル完全特化**: 画面横幅は最大400px前後（スマホサイズ）固定。PCアクセス時は画面中央に枠が浮いているだけのデザインにする。
+- **親指（Thumb）ゾーンの死守**: すべての主要インタラクション（スワイプ、大型ボタン）は、片手で持った時の親指の可動域（画面下半分）に配置する。
