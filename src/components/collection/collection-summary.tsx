@@ -35,8 +35,8 @@ export function CollectionSummary({
             }}
           >
             <Image
-              src={spot.imageUrl}
-              alt={spot.imageAlt}
+              src={spot.images[0].src}
+              alt={spot.images[0].alt}
               fill
               sizes="44px"
               className="object-cover"
