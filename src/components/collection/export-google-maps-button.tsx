@@ -23,18 +23,18 @@ export function ExportGoogleMapsButton() {
     <button
       type="button"
       onClick={handleExport}
-      className="flex w-full items-center gap-3 rounded-2xl bg-gradient-to-r from-electric-chilli to-chilli-bright px-4 py-3.5 shadow-[0_6px_24px_rgba(255,69,0,0.45)] transition-transform active:scale-[0.98] hover:shadow-[0_8px_28px_rgba(255,69,0,0.55)]"
+      className="flex w-full items-center gap-3 rounded-2xl bg-gradient-to-r from-electric-chilli to-chilli-bright px-4 py-3.5 shadow-[0_6px_24px_rgba(224,62,0,0.45)] transition-transform active:scale-[0.98] hover:shadow-[0_8px_28px_rgba(224,62,0,0.55)]"
     >
       <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-white">
         <GoogleMapsPinIcon />
       </div>
       <div className="min-w-0 flex-1 text-left">
-        <p className="text-[15px] font-bold leading-tight text-white">
+        <p className="text-[15px] font-bold leading-tight text-text-primary">
           Export to Google Maps
         </p>
-        <p className="text-xs font-medium text-white/80">Save all to your map</p>
+        <p className="text-xs font-medium text-text-primary/80">Save all to your map</p>
       </div>
-      <ArrowRight className="size-5 shrink-0 text-white" />
+      <ArrowRight className="size-5 shrink-0 text-text-primary" />
     </button>
   );
 }

@@ -1,20 +1,27 @@
 @import "tailwindcss";
 
 @theme inline {
-  /* 60% Dominant — Premium Dark / Midnight Black */
-  --color-midnight: #0a0a0a;
-  --color-surface: #111111;
-  --color-surface-raised: #1a1a1a;
+  /* 60% Dominant — 焦がし醤油・ビターチョコ */
+  --color-midnight: #120d0c;
+  --color-surface: #1a1412;
+  --color-surface-raised: #241e1b;
 
-  /* 10% Accent — Electric Chilli */
-  --color-electric-chilli: #ff4500;
-  --color-chilli-bright: #ff5a1a;
+  /* 10% Accent — 完熟チリ・特製ラー油 */
+  --color-electric-chilli: #e03e00;
+  --color-chilli-bright: #ff4500;
+  --color-chilli-deep: #c03200;
 
-  /* 30% Secondary — white text + warm muted greys */
-  --color-text-primary: #ffffff;
-  --color-text-muted: #a39e97;
-  --color-stealth: #6b6560;
-  --color-stealth-hover: #8a8278;
+  /* Rating — Honey Mustard */
+  --color-honey: #ffb800;
+
+  /* Status — Fresh Basil */
+  --color-basil: #10b981;
+
+  /* 30% Secondary — マイルドクリーム・湯気 */
+  --color-text-primary: #f5f0eb;
+  --color-text-muted: #a39590;
+  --color-stealth: #a39590;
+  --color-stealth-hover: #b8a8a2;
 
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }

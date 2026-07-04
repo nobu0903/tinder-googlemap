@@ -8,10 +8,10 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-electric-chilli text-white shadow hover:bg-[#e63e00]",
+          "bg-electric-chilli text-text-primary shadow hover:bg-chilli-deep",
         outline:
-          "border border-white/15 bg-transparent text-text-muted hover:border-white/25 hover:bg-white/5 hover:text-white/80",
-        ghost: "text-text-muted hover:bg-white/5 hover:text-white/80",
+          "border border-white/15 bg-transparent text-text-muted hover:border-white/25 hover:bg-white/5 hover:text-text-primary",
+        ghost: "text-text-muted hover:bg-white/5 hover:text-text-primary",
       },
       size: {
         default: "h-10 px-4 py-2",

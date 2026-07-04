@@ -38,7 +38,7 @@ export function BottomNav() {
               {isActive && (
                 <span
                   aria-hidden
-                  className="absolute -top-px left-1/2 h-[2px] w-10 -translate-x-1/2 rounded-full bg-electric-chilli shadow-[0_0_10px_rgba(255,69,0,0.7)]"
+                  className="absolute -top-px left-1/2 h-[2px] w-10 -translate-x-1/2 rounded-full bg-electric-chilli shadow-[0_0_10px_rgba(224,62,0,0.7)]"
                 />
               )}
               <span className="text-lg leading-none" aria-hidden>
@@ -47,7 +47,7 @@ export function BottomNav() {
               <span
                 className={cn(
                   "text-[10px] font-semibold tracking-[0.12em]",
-                  isActive && "drop-shadow-[0_0_8px_rgba(255,69,0,0.5)]",
+                  isActive && "drop-shadow-[0_0_8px_rgba(224,62,0,0.5)]",
                 )}
               >
                 {tab.label}
