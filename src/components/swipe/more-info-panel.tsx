@@ -194,7 +194,7 @@ export function MoreInfoPanel({ isOpen, onClose }: MoreInfoPanelProps) {
         </div>
 
         {/* Scrollable content */}
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-8 pt-2">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-6 pt-2">
 
           {/* ── Store name + status ── */}
           <div className="mb-4">
@@ -256,7 +256,7 @@ export function MoreInfoPanel({ isOpen, onClose }: MoreInfoPanelProps) {
           </div>
 
           {/* ── Basic Info section ── */}
-          <div>
+          <div className="pb-4">
             <h3 className="mb-3 text-[15px] font-black text-text-primary">
               Basic Info
             </h3>

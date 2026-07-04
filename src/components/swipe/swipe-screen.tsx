@@ -1,9 +1,14 @@
+"use client";
+
+import { useState } from "react";
 import { MobileShell } from "@/components/layout/mobile-shell";
 import { BottomNav } from "@/components/layout/bottom-nav";
 import { SwipeCard } from "@/components/swipe/swipe-card";
 import { SwipeActions } from "@/components/swipe/swipe-actions";
 
 export function SwipeScreen() {
+  const [moreInfoOpen, setMoreInfoOpen] = useState(false);
+
   return (
     <MobileShell>
       <main className="flex min-h-0 flex-1 flex-col px-4 pb-28 pt-6">
@@ -21,8 +26,8 @@ export function SwipeScreen() {
         {/* Card fills remaining height; actions overlap card bottom */}
         <section className="flex min-h-0 flex-1 flex-col pb-2">
           <div className="relative flex min-h-0 flex-1 flex-col">
-            <SwipeCard />
-            <SwipeActions />
+            <SwipeCard onMoreInfoOpenChange={setMoreInfoOpen} />
+            <SwipeActions hidden={moreInfoOpen} />
           </div>
         </section>
       </main>

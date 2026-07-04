@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import Image from "next/image";
 import { ChevronUp, MapPin } from "lucide-react";
 import { MOCK_SPOT } from "@/lib/constants";
@@ -9,9 +9,10 @@ import { MoreInfoPanel } from "./more-info-panel";
 
 interface SwipeCardProps {
   className?: string;
+  onMoreInfoOpenChange?: (open: boolean) => void;
 }
 
-export function SwipeCard({ className }: SwipeCardProps) {
+export function SwipeCard({ className, onMoreInfoOpenChange }: SwipeCardProps) {
   const images = MOCK_SPOT.images;
   // Each "page" shows 2 photos. pairIndex = which pair is visible.
   const pairCount = Math.ceil(images.length / 2);
@@ -22,8 +23,12 @@ export function SwipeCard({ className }: SwipeCardProps) {
   const bottomPhoto = images[pairIndex * 2 + 1] ?? images[0];
 
   const handleMoreInfo = () => {
-    setMoreInfoOpen(true);
+    setMoreInfoOpen((open) => !open);
   };
+
+  useEffect(() => {
+    onMoreInfoOpenChange?.(moreInfoOpen);
+  }, [moreInfoOpen, onMoreInfoOpenChange]);
 
   // Tap anywhere on the photo stack to advance pairs
   const handleTap = useCallback(
@@ -45,9 +50,8 @@ export function SwipeCard({ className }: SwipeCardProps) {
     <article
       className={cn(
         // overflow-hidden clips the slide-up panel to the card bounds
-        "relative z-0 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[32px] shadow-[0_12px_40px_rgba(0,0,0,0.5),0_0_0_1px_rgba(255,255,255,0.06)]",
-        // Raise above action buttons while the panel is open
-        moreInfoOpen && "z-50",
+        "relative z-0 flex min-h-0 flex-1 flex-col rounded-[32px] shadow-[0_12px_40px_rgba(0,0,0,0.5),0_0_0_1px_rgba(255,255,255,0.06)]",
+        moreInfoOpen ? "overflow-visible" : "overflow-hidden",
         className,
       )}
     >
