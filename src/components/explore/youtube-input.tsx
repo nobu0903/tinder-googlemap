@@ -26,7 +26,7 @@ export function YouTubeInput() {
         <div className="flex items-center gap-3">
           <YouTubeIcon />
           <div>
-            <p className="text-[14px] font-bold leading-tight text-white">
+            <p className="text-[14px] font-bold leading-tight text-text-primary">
               Discover from YouTube
             </p>
             <p className="mt-0.5 text-[11px] leading-snug text-text-muted">
@@ -52,15 +52,15 @@ export function YouTubeInput() {
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="https://www.youtube.com/watch?v=..."
-          className="h-11 flex-1 rounded-xl border border-white/10 bg-surface-raised px-3.5 text-[13px] text-white/80 placeholder:text-stealth focus:border-electric-chilli/50 focus:outline-none focus:ring-1 focus:ring-electric-chilli/30"
+          className="h-11 flex-1 rounded-xl border border-white/10 bg-surface-raised px-3.5 text-[13px] text-text-primary placeholder:text-stealth focus:border-electric-chilli/50 focus:outline-none focus:ring-1 focus:ring-electric-chilli/30"
         />
         <button
           type="button"
           onClick={handleSubmit}
           aria-label="Search"
-          className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-electric-chilli shadow-[0_4px_16px_rgba(255,69,0,0.4)] transition-transform active:scale-95 hover:bg-chilli-bright"
+          className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-electric-chilli shadow-[0_4px_16px_rgba(224,62,0,0.4)] transition-transform active:scale-95 hover:bg-chilli-bright"
         >
-          <ArrowRight className="size-5 text-white" />
+          <ArrowRight className="size-5 text-text-primary" />
         </button>
       </div>
     </section>

@@ -28,7 +28,7 @@ export function CollectionTabs({ activeTab, onTabChange }: CollectionTabsProps) 
             {isActive && (
               <span
                 aria-hidden
-                className="absolute inset-x-4 bottom-0 h-[2px] rounded-full bg-electric-chilli shadow-[0_0_8px_rgba(255,69,0,0.5)]"
+                className="absolute inset-x-4 bottom-0 h-[2px] rounded-full bg-electric-chilli shadow-[0_0_8px_rgba(224,62,0,0.5)]"
               />
             )}
           </button>

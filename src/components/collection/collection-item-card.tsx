@@ -113,21 +113,21 @@ export function CollectionItemCard({ spot }: CollectionItemCardProps) {
       {/* Info — first photo only */}
       {isFirst && (
         <div className="absolute inset-x-0 bottom-0 flex h-full flex-col justify-between p-3.5">
-          <div className="flex items-center gap-1 text-[11px] font-medium text-white/80">
+          <div className="flex items-center gap-1 text-[11px] font-medium text-text-muted">
             <MapPin className="size-3" />
             {spot.distanceKm} km
           </div>
 
           <div className="pr-10">
-            <h2 className="truncate text-[15px] font-black uppercase leading-tight tracking-tight text-white">
+            <h2 className="truncate text-[15px] font-black uppercase leading-tight tracking-tight text-text-primary">
               {spot.name}
             </h2>
             <span className="mt-1 inline-flex rounded-full border border-electric-chilli/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-chilli-bright">
               {spot.category}
             </span>
             <p className="mt-1.5 flex items-center gap-1.5 text-[11px] font-medium">
-              <span className="text-[#ffd966]">⭐ {spot.rating}</span>
-              <span className="text-white/30">|</span>
+              <span className="text-honey">⭐ {spot.rating}</span>
+              <span className="text-text-muted/50">|</span>
               <span className="text-chilli-bright">{spot.priceLevel}</span>
             </p>
           </div>

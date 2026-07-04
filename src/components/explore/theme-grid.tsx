@@ -29,17 +29,17 @@ function ThemeTile({ theme }: { theme: ExploreTheme }) {
       />
 
       {/* Price badge — top right */}
-      <span className="absolute right-2 top-2 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-semibold text-white/90 backdrop-blur-sm">
+      <span className="absolute right-2 top-2 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-semibold text-text-primary backdrop-blur-sm">
         {theme.priceLabel}
       </span>
 
       {/* Bottom info */}
       <div className="absolute inset-x-0 bottom-0 p-3">
         <span className="text-xl leading-none">{theme.emoji}</span>
-        <p className="mt-1 text-[13px] font-black leading-tight text-white">
+        <p className="mt-1 text-[13px] font-black leading-tight text-text-primary">
           {theme.name}
         </p>
-        <p className="mt-0.5 text-[11px] font-medium text-white/65">
+        <p className="mt-0.5 text-[11px] font-medium text-text-muted">
           {theme.subtitle}
         </p>
       </div>
@@ -51,7 +51,7 @@ export function ThemeGrid() {
   return (
     <section className="px-4 pb-4">
       <div className="mb-3">
-        <h2 className="text-[15px] font-black text-white">Explore by Theme</h2>
+        <h2 className="text-[15px] font-black text-text-primary">Explore by Theme</h2>
         <p className="mt-0.5 text-[12px] text-text-muted">
           Pick a vibe. We&apos;ll show you the perfect spots.
         </p>

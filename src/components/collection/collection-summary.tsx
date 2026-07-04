@@ -14,7 +14,7 @@ export function CollectionSummary({
   return (
     <section className="flex items-center justify-between px-4 py-5">
       <div>
-        <p className="text-sm font-medium text-white/90">Your Collection ✨</p>
+        <p className="text-sm font-medium text-text-primary">Your Collection ✨</p>
         <p className="mt-0.5 text-4xl font-black leading-none text-electric-chilli">
           {totalCount}
         </p>

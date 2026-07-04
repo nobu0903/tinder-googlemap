@@ -5,6 +5,7 @@ import Image from "next/image";
 import { ChevronUp, MapPin } from "lucide-react";
 import { MOCK_SPOT } from "@/lib/constants";
 import { cn } from "@/lib/utils";
+import { MoreInfoPanel } from "./more-info-panel";
 
 interface SwipeCardProps {
   className?: string;
@@ -15,12 +16,13 @@ export function SwipeCard({ className }: SwipeCardProps) {
   // Each "page" shows 2 photos. pairIndex = which pair is visible.
   const pairCount = Math.ceil(images.length / 2);
   const [pairIndex, setPairIndex] = useState(0);
+  const [moreInfoOpen, setMoreInfoOpen] = useState(false);
 
   const topPhoto = images[pairIndex * 2];
   const bottomPhoto = images[pairIndex * 2 + 1] ?? images[0];
 
   const handleMoreInfo = () => {
-    console.log("More Info clicked — Menya Soul Heaven");
+    setMoreInfoOpen(true);
   };
 
   // Tap anywhere on the photo stack to advance pairs
@@ -42,7 +44,10 @@ export function SwipeCard({ className }: SwipeCardProps) {
   return (
     <article
       className={cn(
-        "relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[32px] shadow-[0_12px_40px_rgba(0,0,0,0.5),0_0_0_1px_rgba(255,255,255,0.06)]",
+        // overflow-hidden clips the slide-up panel to the card bounds
+        "relative z-0 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[32px] shadow-[0_12px_40px_rgba(0,0,0,0.5),0_0_0_1px_rgba(255,255,255,0.06)]",
+        // Raise above action buttons while the panel is open
+        moreInfoOpen && "z-50",
         className,
       )}
     >
@@ -72,8 +77,8 @@ export function SwipeCard({ className }: SwipeCardProps) {
 
         {/* Distance badge — top right */}
         <div className="absolute right-4 top-9 z-10">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-black/55 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm ring-1 ring-white/10">
-            <MapPin className="size-3.5 text-white/80" />
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-black/55 px-3 py-1.5 text-xs font-medium text-text-primary backdrop-blur-sm ring-1 ring-white/10">
+            <MapPin className="size-3.5 text-text-muted" />
             {MOCK_SPOT.distanceKm} km away
           </span>
         </div>
@@ -104,24 +109,29 @@ export function SwipeCard({ className }: SwipeCardProps) {
             sizes="(max-width: 400px) 100vw, 400px"
             className="object-cover object-center"
           />
+          {/* Gradient fading photo into text strip
+          <div
+            aria-hidden
+            className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-surface to-transparent"
+          /> */}
         </div>
       </div>
 
       {/* ── Jet-black text strip (≈16% of card) ── */}
-      <div className="shrink-0 bg-[#111111] px-5 pb-10 pt-4">
+      <div className="shrink-0 bg-surface px-5 pb-10 pt-4">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <h2 className="text-[1.5rem] font-black uppercase leading-[1.05] tracking-[-0.02em] text-white">
+            <h2 className="text-[1.5rem] font-black uppercase leading-[1.05] tracking-[-0.02em] text-text-primary">
               {MOCK_SPOT.name}
             </h2>
             <p className="mt-1.5 flex flex-wrap items-center gap-x-2 text-[12px] font-medium">
-              <span className="text-chilli-bright">
+              <span className="text-honey">
                 ⭐ {MOCK_SPOT.rating}
               </span>
-              <span className="text-white/50">({MOCK_SPOT.reviewCount})</span>
-              <span className="text-white/20">|</span>
-              <span className="text-[#6ee76e]">🟢 Open Now</span>
-              <span className="text-white/20">|</span>
+              <span className="text-text-muted">({MOCK_SPOT.reviewCount})</span>
+              <span className="text-text-muted/40">|</span>
+              <span className="text-basil">🟢 Open Now</span>
+              <span className="text-text-muted/40">|</span>
               <span className="text-chilli-bright">¥{MOCK_SPOT.priceRange}</span>
             </p>
           </div>
@@ -130,12 +140,22 @@ export function SwipeCard({ className }: SwipeCardProps) {
             type="button"
             aria-label="More Info"
             onClick={handleMoreInfo}
-            className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white ring-1 ring-white/15 transition-colors hover:bg-white/20"
+            className={cn(
+              "flex size-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-text-primary ring-1 ring-white/15 transition-all hover:bg-white/20",
+              // Rotate arrow when panel is open
+              moreInfoOpen && "rotate-180",
+            )}
           >
-            <ChevronUp className="size-5 stroke-[3]" />
+            <ChevronUp className="size-5 stroke-[3] transition-transform duration-300" />
           </button>
         </div>
       </div>
+
+      {/* ── More Info slide-up panel ── */}
+      <MoreInfoPanel
+        isOpen={moreInfoOpen}
+        onClose={() => setMoreInfoOpen(false)}
+      />
     </article>
   );
 }
