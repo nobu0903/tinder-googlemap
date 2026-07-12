@@ -2,20 +2,17 @@
 
 import { Heart, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { SwipeAction } from "@/types/backend";
 
 interface SwipeActionsProps {
   className?: string;
   hidden?: boolean;
+  onSwipe?: (action: SwipeAction) => void;
 }
 
-export function SwipeActions({ className, hidden }: SwipeActionsProps) {
-  const handleDislike = () => {
-    console.log("Dislike — pass");
-  };
-
-  const handleLike = () => {
-    console.log("Like — saved to collection");
-  };
+export function SwipeActions({ className, hidden, onSwipe }: SwipeActionsProps) {
+  const handleDislike = () => onSwipe?.("dislike");
+  const handleLike = () => onSwipe?.("like");
 
   return (
     <div
