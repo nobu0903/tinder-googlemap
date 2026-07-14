@@ -52,16 +52,29 @@ export interface SwipeRow {
   created_at: string;
 }
 
-/** Photos fetched and stored per spot (Nearby + Place Details) */
-export const MAX_STORED_PHOTOS = 10;
+/**
+ * Photos fetched and stored per spot (Nearby + Place Details).
+ * Kept at 3 to cap Google Place Photo API billing — each photo URL
+ * displayed in the browser is a separate billed request ($0.007/photo).
+ */
+export const MAX_STORED_PHOTOS = 6;
 
-/** Enrich via Place Details until MAX_STORED_PHOTOS photos are cached */
-export const MIN_PHOTOS_SKIP_DETAILS = MAX_STORED_PHOTOS;
+/** Skip Place Details when at least this many photos exist from search cache */
+export const MIN_PHOTOS_SKIP_DETAILS = 3;
+
+/** Max Place Details calls per production feed batch (0 = lazy client hydrate only) */
+export const PRODUCTION_MAX_DETAILS_PER_FEED = 0;
+
+/** Max Place Details calls per admin feed batch */
+export const ADMIN_MAX_DETAILS_PER_FEED = 8;
 
 // `layoutType` drives how the swipe card renders photos.
 // DUAL_STACK = 2 stacked horizontal images (width > height)
 // SINGLE_FULL = 1 portrait image filling the full card (height >= width)
-export type LayoutType = "DUAL_STACK" | "SINGLE_FULL";
+// AD_NATIVE = in-feed sponsored slot (not a Google Place)
+export type LayoutType = "DUAL_STACK" | "SINGLE_FULL" | "AD_NATIVE";
+
+export type SpotLayoutType = Exclude<LayoutType, "AD_NATIVE">;
 
 export interface FeedPhoto {
   url: string;
@@ -69,8 +82,25 @@ export interface FeedPhoto {
 }
 
 export interface FeedPhotoPage {
-  layoutType: LayoutType;
+  layoutType: SpotLayoutType;
   photos: FeedPhoto[];
+}
+
+/** In-feed native ad placeholder — injected by GET /api/swipe only */
+export interface FeedNativeAd {
+  id: "ad-slot-google-admob";
+  layoutType: "AD_NATIVE";
+  name: "Sponsored";
+}
+
+export type SwipeFeedItem = FeedSpot | FeedNativeAd;
+
+export function isFeedNativeAd(item: SwipeFeedItem): item is FeedNativeAd {
+  return item.layoutType === "AD_NATIVE";
+}
+
+export function feedItemKey(item: SwipeFeedItem): string {
+  return isFeedNativeAd(item) ? item.id : item.spotId;
 }
 
 export interface FeedSpot {
@@ -93,7 +123,7 @@ export interface FeedSpot {
   todayClose: string | null;
   category: string;
   /** Layout of the first photo page */
-  layoutType: LayoutType;
+  layoutType: SpotLayoutType;
   /** Photos on the first page (convenience mirror of photoPages[0]) */
   photos: FeedPhoto[];
   vibeTags: string[];
@@ -113,7 +143,7 @@ export interface SwipeFeedParams {
 }
 
 export interface SwipeFeedResponse {
-  spots: FeedSpot[];
+  spots: SwipeFeedItem[];
   /** Search radius actually used (km) — may be 2, 5, or 10 after auto-expansion */
   radiusKm: number;
 }

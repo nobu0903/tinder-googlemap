@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { NAV_TABS, type NavTabId } from "@/lib/constants";
 
 function resolveActiveTab(pathname: string): NavTabId {
+  if (pathname.startsWith("/admin")) return "admin";
   if (pathname.startsWith("/explore")) return "explore";
   if (pathname.startsWith("/collection")) return "collection";
   return "swipe";

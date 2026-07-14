@@ -30,7 +30,10 @@ interface SwipeCardProps {
 
 
 
-const PREFETCH_AHEAD = 2;
+// Reduced from 2 → 1 to limit rendered <Image> components per card.
+// Each rendered photo = 1 Google Place Photo API call ($0.007); prefetching
+// 2 pages ahead was loading photos the user might never reach.
+const PREFETCH_AHEAD = 1;
 
 
 

@@ -1,17 +1,26 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { EXPLORE_THEMES, type ExploreTheme } from "@/lib/explore-mock";
+import { ACTIVE_THEME_IDS, buildThemedSwipePath } from "@/lib/explore/themes";
+import { useAuth } from "@/lib/hooks/use-auth";
 
-function ThemeTile({ theme }: { theme: ExploreTheme }) {
-  const handleClick = () => {
-    console.log("Theme selected:", theme.name);
-  };
+const ACTIVE_THEMES = EXPLORE_THEMES.filter((t) =>
+  ACTIVE_THEME_IDS.includes(t.id as (typeof ACTIVE_THEME_IDS)[number]),
+);
 
+function ThemeTile({
+  theme,
+  onSelect,
+}: {
+  theme: ExploreTheme;
+  onSelect: (theme: ExploreTheme) => void;
+}) {
   return (
     <button
       type="button"
-      onClick={handleClick}
+      onClick={() => onSelect(theme)}
       className="group relative aspect-[4/3] w-full overflow-hidden rounded-2xl"
     >
       <Image
@@ -22,18 +31,12 @@ function ThemeTile({ theme }: { theme: ExploreTheme }) {
         className="object-cover object-center transition-transform duration-300 group-active:scale-95"
       />
 
-      {/* Dark overlay */}
-      <div
-        aria-hidden
-        className="absolute inset-0 bg-black/45"
-      />
+      <div aria-hidden className="absolute inset-0 bg-black/45" />
 
-      {/* Price badge — top right */}
       <span className="absolute right-2 top-2 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-semibold text-text-primary backdrop-blur-sm">
         {theme.priceLabel}
       </span>
 
-      {/* Bottom info */}
       <div className="absolute inset-x-0 bottom-0 p-3">
         <span className="text-xl leading-none">{theme.emoji}</span>
         <p className="mt-1 text-[13px] font-black leading-tight text-text-primary">
@@ -48,6 +51,22 @@ function ThemeTile({ theme }: { theme: ExploreTheme }) {
 }
 
 export function ThemeGrid() {
+  const router = useRouter();
+  const { session, isLoading } = useAuth();
+
+  const handleSelect = (theme: ExploreTheme) => {
+    const destination = buildThemedSwipePath(theme.id);
+
+    if (isLoading) return;
+
+    if (!session) {
+      router.push(`/login?redirect=${encodeURIComponent(destination)}`);
+      return;
+    }
+
+    router.push(destination);
+  };
+
   return (
     <section className="px-4 pb-4">
       <div className="mb-3">
@@ -58,8 +77,8 @@ export function ThemeGrid() {
       </div>
 
       <div className="grid grid-cols-2 gap-2.5">
-        {EXPLORE_THEMES.map((theme) => (
-          <ThemeTile key={theme.id} theme={theme} />
+        {ACTIVE_THEMES.map((theme) => (
+          <ThemeTile key={theme.id} theme={theme} onSelect={handleSelect} />
         ))}
       </div>
     </section>

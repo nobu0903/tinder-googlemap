@@ -10,16 +10,29 @@ import type {
 } from "@/types/backend";
 import {
   MAX_STORED_PHOTOS,
+  MIN_PHOTOS_SKIP_DETAILS,
 } from "@/types/backend";
 import {
   isDiningPlace,
   isDiningSpotRow,
 } from "@/lib/places/dining-filter";
 import { CHAIN_PRIMARY_TYPES } from "@/lib/places/chain-filter";
+import {
+  ingestAreaKey,
+  isIngestOnCooldown,
+  markIngestCompleted,
+} from "@/lib/places/ingest-cooldown";
+import { DEFAULT_FEED_CONFIG } from "@/lib/feed/config";
 
 const GOOGLE_PLACES_BASE = "https://places.googleapis.com/v1";
-const CACHE_TTL_DAYS = 7;
+const CACHE_TTL_DAYS = 14;
+/** Minimum review count to cache — matches feed noise floor (60) */
+const MIN_CACHE_REVIEW_COUNT = DEFAULT_FEED_CONFIG.vibeMinReviews;
 const MIN_CACHED_SPOTS = 20;
+/** Minimum vibe-range spots in cache before skipping supplemental ingest */
+const MIN_VIBE_CACHED_SPOTS = 15;
+/** Production: skip repeat nearby ingest if box had any upsert within this window */
+const PRODUCTION_INGEST_COOLDOWN_MS = 2 * 60 * 60 * 1000;
 
 /** Chain-heavy types + top-level lodging types for searchNearby (Table A only) */
 const EXCLUDED_PRIMARY_TYPES = [
@@ -28,23 +41,49 @@ const EXCLUDED_PRIMARY_TYPES = [
   "hotel",
 ];
 
-const INCLUDED_NEARBY_TYPES = ["restaurant", "cafe"];
+/** Admin: full multi-type discovery */
+const ADMIN_NEARBY_TYPES = [
+  "restaurant",
+  "cafe",
+  "bar",
+  "bakery",
+  "meal_takeaway",
+];
 
-const NEARBY_FIELD_MASK = [
+/** Production: combined nearby types — no Text Search */
+const PRODUCTION_NEARBY_TYPES = ["restaurant", "cafe", "bar"];
+
+/** Text queries with DISTANCE ranking (admin only) */
+const TEXT_SEARCH_QUERIES = ["restaurant", "cafe", "bar"];
+
+export type IngestProfile = "production" | "admin";
+
+export interface IngestApiCalls {
+  nearbySearch: number;
+  textSearch: number;
+  placeDetails: number;
+}
+
+export const EMPTY_INGEST_API_CALLS: IngestApiCalls = {
+  nearbySearch: 0,
+  textSearch: 0,
+  placeDetails: 0,
+};
+
+/** Lean search mask — no opening hours / types (lower SKU than full Pro fields) */
+const SEARCH_FIELD_MASK = [
   "places.id",
   "places.displayName",
-  "places.formattedAddress",
   "places.rating",
   "places.userRatingCount",
   "places.priceLevel",
   "places.primaryType",
-  "places.types",
   "places.photos",
-  "places.currentOpeningHours",
   "places.location",
 ].join(",");
 
-const DETAILS_FIELD_MASK = [
+/** Full details when metadata is missing */
+const DETAILS_FULL_FIELD_MASK = [
   "id",
   "displayName",
   "formattedAddress",
@@ -52,11 +91,13 @@ const DETAILS_FIELD_MASK = [
   "userRatingCount",
   "priceLevel",
   "primaryType",
-  "types",
   "photos",
   "currentOpeningHours",
   "location",
 ].join(",");
+
+/** Photos-only details — cheapest refresh when search already cached metadata */
+const DETAILS_PHOTOS_FIELD_MASK = "id,photos";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -184,25 +225,29 @@ function needsDetailsEnrichment(
   forceIfSparse: boolean,
 ): boolean {
   if (!forceIfSparse) return false;
-  if (photoCount(row) >= MAX_STORED_PHOTOS) return false;
   if (!row) return true;
-  // Full photo quota met on a fresh row — skip
-  if (isCacheFresh(row.updated_at) && photoCount(row) >= MAX_STORED_PHOTOS) {
-    return false;
+  if (photoCount(row) >= MIN_PHOTOS_SKIP_DETAILS) return false;
+  return true;
+}
+
+function detailsFieldMask(row: SpotRow | null): string {
+  if (row?.name && row.lat && row.lng) {
+    return DETAILS_PHOTOS_FIELD_MASK;
   }
-  // Sparse rows (< 10 photos): enrich even on fresh cache (legacy 5-photo data)
-  if (photoCount(row) < MAX_STORED_PHOTOS) return true;
-  return !isCacheFresh(row.updated_at);
+  return DETAILS_FULL_FIELD_MASK;
 }
 
 // ── Google API calls ──────────────────────────────────────────────────────────
 
-async function fetchPlaceDetails(placeId: string): Promise<GooglePlacesPlace | null> {
+async function fetchPlaceDetails(
+  placeId: string,
+  fieldMask: string = DETAILS_FULL_FIELD_MASK,
+): Promise<GooglePlacesPlace | null> {
   const resourceId = toPlaceResourceId(placeId);
   const res = await fetch(`${GOOGLE_PLACES_BASE}/places/${resourceId}`, {
     headers: {
       "X-Goog-Api-Key": getApiKey(),
-      "X-Goog-FieldMask": DETAILS_FIELD_MASK,
+      "X-Goog-FieldMask": fieldMask,
     },
     next: { revalidate: 3600 },
   });
@@ -217,20 +262,21 @@ async function fetchPlaceDetails(placeId: string): Promise<GooglePlacesPlace | n
   return (await res.json()) as GooglePlacesPlace;
 }
 
-async function fetchNearbyPlaces(
+async function fetchNearbyPlacesByType(
   lat: number,
   lng: number,
   radiusMeters: number,
+  includedType: string,
 ): Promise<GooglePlacesPlace[]> {
   const body = {
-    includedTypes: INCLUDED_NEARBY_TYPES,
+    includedTypes: [includedType],
     excludedTypes: ["lodging"],
     excludedPrimaryTypes: EXCLUDED_PRIMARY_TYPES,
     maxResultCount: 20,
     locationRestriction: {
       circle: {
         center: { latitude: lat, longitude: lng },
-        radius: radiusMeters,
+        radius: Math.min(radiusMeters, 50_000),
       },
     },
   };
@@ -240,7 +286,7 @@ async function fetchNearbyPlaces(
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": getApiKey(),
-      "X-Goog-FieldMask": NEARBY_FIELD_MASK,
+      "X-Goog-FieldMask": SEARCH_FIELD_MASK,
     },
     body: JSON.stringify(body),
     next: { revalidate: 3600 },
@@ -248,11 +294,155 @@ async function fetchNearbyPlaces(
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Google Places API error ${res.status}: ${text}`);
+    console.warn(
+      `[ingest] searchNearby(${includedType}) failed ${res.status}: ${text}`,
+    );
+    return [];
   }
 
   const data = await res.json();
   return (data.places ?? []) as GooglePlacesPlace[];
+}
+
+/** Single nearby request with multiple types — 1 API call instead of N */
+async function fetchNearbyPlacesCombined(
+  lat: number,
+  lng: number,
+  radiusMeters: number,
+  includedTypes: string[],
+): Promise<GooglePlacesPlace[]> {
+  const body = {
+    includedTypes,
+    excludedTypes: ["lodging"],
+    excludedPrimaryTypes: EXCLUDED_PRIMARY_TYPES,
+    maxResultCount: 20,
+    locationRestriction: {
+      circle: {
+        center: { latitude: lat, longitude: lng },
+        radius: Math.min(radiusMeters, 50_000),
+      },
+    },
+  };
+
+  const res = await fetch(`${GOOGLE_PLACES_BASE}/places:searchNearby`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": getApiKey(),
+      "X-Goog-FieldMask": SEARCH_FIELD_MASK,
+    },
+    body: JSON.stringify(body),
+    next: { revalidate: 3600 },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    console.warn(
+      `[ingest] searchNearby(combined) failed ${res.status}: ${text}`,
+    );
+    return [];
+  }
+
+  const data = await res.json();
+  return (data.places ?? []) as GooglePlacesPlace[];
+}
+
+async function fetchTextSearchPlaces(
+  lat: number,
+  lng: number,
+  radiusMeters: number,
+  textQuery: string,
+): Promise<GooglePlacesPlace[]> {
+  const box = boundingBox(lat, lng, radiusMeters);
+  const body = {
+    textQuery,
+    pageSize: 20,
+    rankPreference: "DISTANCE",
+    locationRestriction: {
+      rectangle: {
+        low: { latitude: box.minLat, longitude: box.minLng },
+        high: { latitude: box.maxLat, longitude: box.maxLng },
+      },
+    },
+  };
+
+  const res = await fetch(`${GOOGLE_PLACES_BASE}/places:searchText`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": getApiKey(),
+      "X-Goog-FieldMask": SEARCH_FIELD_MASK,
+    },
+    body: JSON.stringify(body),
+    next: { revalidate: 3600 },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    console.warn(
+      `[ingest] searchText("${textQuery}") failed ${res.status}: ${text}`,
+    );
+    return [];
+  }
+
+  const data = await res.json();
+  return (data.places ?? []) as GooglePlacesPlace[];
+}
+
+function mergeUniquePlaces(batches: GooglePlacesPlace[][]): GooglePlacesPlace[] {
+  const seen = new Set<string>();
+  const out: GooglePlacesPlace[] = [];
+  for (const batch of batches) {
+    for (const place of batch) {
+      if (seen.has(place.id)) continue;
+      seen.add(place.id);
+      out.push(place);
+    }
+  }
+  return out;
+}
+
+/**
+ * Multi-strategy discovery: per-type nearby + optional distance-ranked text search.
+ * Google searchNearby returns prominence-biased results; combining strategies
+ * surfaces more vibe-range (60–499 review) spots in tourist areas.
+ */
+async function discoverDiversePlaces(
+  lat: number,
+  lng: number,
+  radiusMeters: number,
+  options: {
+    nearbyTypes: string[];
+    textSearch: boolean;
+    combinedNearby: boolean;
+    apiCalls: IngestApiCalls;
+  },
+): Promise<GooglePlacesPlace[]> {
+  let nearbyBatches: GooglePlacesPlace[][];
+
+  if (options.combinedNearby) {
+    options.apiCalls.nearbySearch += 1;
+    nearbyBatches = [
+      await fetchNearbyPlacesCombined(lat, lng, radiusMeters, options.nearbyTypes),
+    ];
+  } else {
+    nearbyBatches = await Promise.all(
+      options.nearbyTypes.map(async (type) => {
+        options.apiCalls.nearbySearch += 1;
+        return fetchNearbyPlacesByType(lat, lng, radiusMeters, type);
+      }),
+    );
+  }
+
+  const textBatches: GooglePlacesPlace[][] = [];
+  if (options.textSearch) {
+    for (const query of TEXT_SEARCH_QUERIES) {
+      options.apiCalls.textSearch += 1;
+      textBatches.push(await fetchTextSearchPlaces(lat, lng, radiusMeters, query));
+    }
+  }
+
+  return mergeUniquePlaces([...nearbyBatches, ...textBatches]);
 }
 
 // ── Enrichment ────────────────────────────────────────────────────────────────
@@ -264,12 +454,17 @@ async function fetchNearbyPlaces(
 export async function enrichSpotFromDetails(
   spotId: string,
   cachedRow?: SpotRow | null,
+  apiCalls?: IngestApiCalls,
 ): Promise<SpotRow | null> {
   if (!needsDetailsEnrichment(cachedRow ?? null, true)) {
     return cachedRow ?? null;
   }
 
-  const details = await fetchPlaceDetails(spotId);
+  if (apiCalls) apiCalls.placeDetails += 1;
+  const details = await fetchPlaceDetails(
+    spotId,
+    detailsFieldMask(cachedRow ?? null),
+  );
   if (!details) return cachedRow ?? null;
 
   const enriched = mapPlaceToRow(details, cachedRow ?? undefined);
@@ -289,28 +484,53 @@ export async function enrichSpotFromDetails(
   return enriched;
 }
 
+export interface HydrateFeedOptions {
+  /** Cap Place Details calls per batch — 0 skips server-side hydrate entirely */
+  maxDetailsCalls?: number;
+}
+
 /**
  * Enrich feed spots that still have sparse photos after cache lookup.
- * Runs Details only for stale/missing rows — max once per spot per 7 days.
+ * Sequential + capped to control burst billing.
  */
-export async function hydrateFeedSpots(rows: SpotRow[]): Promise<SpotRow[]> {
-  const results = await Promise.all(
-    rows.map(async (row) => {
-      if (photoCount(row) >= MAX_STORED_PHOTOS) return row;
+export async function hydrateFeedSpots(
+  rows: SpotRow[],
+  apiCalls?: IngestApiCalls,
+  options?: HydrateFeedOptions,
+): Promise<SpotRow[]> {
+  const maxDetails = options?.maxDetailsCalls ?? rows.length;
+  if (maxDetails <= 0) return rows;
 
-      const { data: cached } = await supabaseAdmin
-        .from("spots")
-        .select("*")
-        .eq("id", row.id)
-        .maybeSingle();
+  const results: SpotRow[] = [];
+  let detailsUsed = 0;
 
-      const source = (cached as SpotRow | null) ?? row;
-      if (!needsDetailsEnrichment(source, true)) return source;
+  for (const row of rows) {
+    if (photoCount(row) >= MIN_PHOTOS_SKIP_DETAILS) {
+      results.push(row);
+      continue;
+    }
 
-      const enriched = await enrichSpotFromDetails(row.id, source);
-      return enriched ?? source;
-    }),
-  );
+    const { data: cached } = await supabaseAdmin
+      .from("spots")
+      .select("*")
+      .eq("id", row.id)
+      .maybeSingle();
+
+    const source = (cached as SpotRow | null) ?? row;
+    if (!needsDetailsEnrichment(source, true)) {
+      results.push(source);
+      continue;
+    }
+
+    if (detailsUsed >= maxDetails) {
+      results.push(source);
+      continue;
+    }
+
+    const enriched = await enrichSpotFromDetails(row.id, source, apiCalls);
+    detailsUsed += 1;
+    results.push(enriched ?? source);
+  }
 
   return results;
 }
@@ -356,60 +576,57 @@ export async function countAvailableSpots(
   return (data ?? []).filter((row) => !excludedIds.includes(row.id)).length;
 }
 
-// ── Main export ───────────────────────────────────────────────────────────────
+/** True when any spot in the box was written recently (DB-backed ingest cooldown). */
+async function hadRecentIngestInBox(box: BoundingBox): Promise<boolean> {
+  const since = new Date(Date.now() - PRODUCTION_INGEST_COOLDOWN_MS).toISOString();
+  const { data } = await supabaseAdmin
+    .from("spots")
+    .select("id")
+    .gte("lat", box.minLat)
+    .lte("lat", box.maxLat)
+    .gte("lng", box.minLng)
+    .lte("lng", box.maxLng)
+    .gt("updated_at", since)
+    .limit(1);
 
-export interface IngestOptions {
-  lat: number;
-  lng: number;
-  radiusMeters: number;
-  excludedIds?: string[];
-  /** When true, always call searchNearby (used on 5 km / 10 km expansion steps) */
-  forceFetch?: boolean;
+  return (data?.length ?? 0) > 0;
 }
 
-/**
- * Ensure the Supabase cache is populated for the given radius.
- * Calls searchNearby ONLY when fewer than 20 fresh un-swiped spots exist.
- * Sparse photo rows are hydrated via Place Details before upsert.
- */
-export async function ensureSpotsCached(opts: IngestOptions): Promise<number> {
-  const { lat, lng, radiusMeters, excludedIds = [], forceFetch = false } = opts;
-  const box = boundingBox(lat, lng, radiusMeters);
+/** Count fresh vibe-range spots in the bounding box. */
+export async function countVibeSpotsInBox(
+  box: BoundingBox,
+  vibeMin: number,
+  vibeMax: number,
+  excludedIds: string[],
+): Promise<number> {
+  const { data } = await supabaseAdmin
+    .from("spots")
+    .select("id")
+    .gte("lat", box.minLat)
+    .lte("lat", box.maxLat)
+    .gte("lng", box.minLng)
+    .lte("lng", box.maxLng)
+    .gte("user_rating_count", vibeMin)
+    .lte("user_rating_count", vibeMax)
+    .gt("updated_at", staleThresholdIso());
 
-  const available = await countAvailableSpots(box, excludedIds);
-  if (!forceFetch && available >= MIN_CACHED_SPOTS) return 0;
+  return (data ?? []).filter((row) => !excludedIds.includes(row.id)).length;
+}
 
-  const places = await fetchNearbyPlaces(lat, lng, radiusMeters);
-  const diningPlaces = places.filter(isDiningPlace);
+function meetsCacheReviewFloor(place: GooglePlacesPlace): boolean {
+  const count = place.userRatingCount;
+  return count !== undefined && count !== null && count >= MIN_CACHE_REVIEW_COUNT;
+}
+
+async function upsertPlacesFromGoogle(
+  places: GooglePlacesPlace[],
+): Promise<number> {
+  const diningPlaces = places.filter(
+    (place) => isDiningPlace(place) && meetsCacheReviewFloor(place),
+  );
   if (diningPlaces.length === 0) return 0;
 
-  const rows: SpotRow[] = [];
-
-  for (const place of diningPlaces) {
-    const nearbyPhotos = place.photos?.length ?? 0;
-    let row = mapPlaceToRow(place);
-
-    if (nearbyPhotos < MAX_STORED_PHOTOS) {
-      const { data: existing } = await supabaseAdmin
-        .from("spots")
-        .select("*")
-        .eq("id", place.id)
-        .maybeSingle();
-
-      const cached = existing as SpotRow | null;
-
-      if (needsDetailsEnrichment(cached, true)) {
-        const details = await fetchPlaceDetails(place.id);
-        if (details) {
-          row = mapPlaceToRow(details, cached ?? row);
-        }
-      } else if (cached) {
-        row = cached;
-      }
-    }
-
-    rows.push(row);
-  }
+  const rows: SpotRow[] = diningPlaces.map((place) => mapPlaceToRow(place));
 
   const { error } = await supabaseAdmin
     .from("spots")
@@ -418,4 +635,111 @@ export async function ensureSpotsCached(opts: IngestOptions): Promise<number> {
   if (error) throw new Error(`Supabase upsert error: ${error.message}`);
 
   return rows.length;
+}
+
+export interface IngestResult {
+  ingested: number;
+  apiCalls: IngestApiCalls;
+  skippedReason?: "cooldown" | "sufficient_cache";
+}
+
+export interface IngestOptions {
+  lat: number;
+  lng: number;
+  radiusMeters: number;
+  excludedIds?: string[];
+  /** When true, bypass cache/cooldown checks and run discovery */
+  forceFetch?: boolean;
+  /** Admin uses full discovery; production uses lighter nearby-only */
+  ingestProfile?: IngestProfile;
+  /** Skip cooldown (admin force ingest) */
+  bypassCooldown?: boolean;
+  vibeMinReviews?: number;
+  vibeMaxReviews?: number;
+  minVibeSpots?: number;
+}
+
+/**
+ * Ensure the Supabase cache is populated for the given radius.
+ * Production: 1× combined nearby, no text search, lazy client hydrate for photos.
+ * Admin: 5× nearby + text search when vibe spots are scarce.
+ */
+export async function ensureSpotsCached(opts: IngestOptions): Promise<IngestResult> {
+  const {
+    lat,
+    lng,
+    radiusMeters,
+    forceFetch = false,
+    ingestProfile = "production",
+    bypassCooldown = false,
+    vibeMinReviews = 60,
+    vibeMaxReviews = 499,
+    minVibeSpots = MIN_VIBE_CACHED_SPOTS,
+  } = opts;
+  const apiCalls: IngestApiCalls = { ...EMPTY_INGEST_API_CALLS };
+  const box = boundingBox(lat, lng, radiusMeters);
+
+  // Ingest thresholds use global cache — not per-user excludeIds
+  const available = await countAvailableSpots(box, []);
+  const vibeAvailable = await countVibeSpotsInBox(
+    box,
+    vibeMinReviews,
+    vibeMaxReviews,
+    [],
+  );
+
+  const needsPrimary = available < MIN_CACHED_SPOTS;
+  const needsVibeDiversity =
+    ingestProfile === "admin" && vibeAvailable < minVibeSpots;
+
+  if (!forceFetch && !needsPrimary && !needsVibeDiversity) {
+    return { ingested: 0, apiCalls, skippedReason: "sufficient_cache" };
+  }
+
+  const areaKey = ingestAreaKey(lat, lng, radiusMeters);
+
+  // Production: in-memory + DB cooldown — serverless-safe guard against ingest loops
+  if (ingestProfile === "production" && !forceFetch) {
+    if (isIngestOnCooldown(areaKey)) {
+      return { ingested: 0, apiCalls, skippedReason: "cooldown" };
+    }
+    if (await hadRecentIngestInBox(box)) {
+      markIngestCompleted(areaKey);
+      return { ingested: 0, apiCalls, skippedReason: "cooldown" };
+    }
+  }
+
+  const vibeOnlyRefresh = needsVibeDiversity && !needsPrimary;
+  const useTextSearch =
+    ingestProfile === "admin" && (needsVibeDiversity || forceFetch);
+
+  // Cooldown blocks expensive admin supplemental fetches, not production nearby-only
+  if (
+    !bypassCooldown &&
+    !forceFetch &&
+    vibeOnlyRefresh &&
+    useTextSearch &&
+    isIngestOnCooldown(areaKey)
+  ) {
+    return { ingested: 0, apiCalls, skippedReason: "cooldown" };
+  }
+
+  const nearbyTypes =
+    ingestProfile === "admin" ? ADMIN_NEARBY_TYPES : PRODUCTION_NEARBY_TYPES;
+
+  const places = await discoverDiversePlaces(lat, lng, radiusMeters, {
+    nearbyTypes,
+    textSearch: useTextSearch,
+    combinedNearby: ingestProfile === "production",
+    apiCalls,
+  });
+
+  if (places.length === 0) {
+    return { ingested: 0, apiCalls };
+  }
+
+  const ingested = await upsertPlacesFromGoogle(places);
+  markIngestCompleted(areaKey);
+
+  return { ingested, apiCalls };
 }
