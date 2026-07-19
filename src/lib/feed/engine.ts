@@ -18,7 +18,10 @@ import {
   PRODUCTION_MAX_DETAILS_PER_FEED,
 } from "@/types/backend";
 import {
+  applyAreaGemBands,
+  denserAreaProfile,
   getFeedConfig,
+  type AreaProfile,
   type FeedAlgorithmConfig,
 } from "./config";
 import {
@@ -27,16 +30,11 @@ import {
   passesReviewNoiseFloor,
   type FeedPoolKind,
 } from "./exclusion";
+import { rankVibePool } from "./gem-score";
+
+export type { AreaProfile };
 
 const PREMIUM_VIBE_TAGS = new Set(["splurge", "date", "dinner", "reward"]);
-
-/**
- * Tourism density tiers derived from the local DB cache.
- * - tourist: many 2000+ review spots → classicMinReviews raised to 2000
- * - urban:   many 1000+ review spots → classicMinReviews raised to 1000
- * - local:   sparse popular spots    → classicMinReviews stays at default
- */
-export type AreaProfile = "tourist" | "urban" | "local";
 
 export type FeedSlotSource = "classic" | "vibe" | "fill";
 
@@ -81,8 +79,14 @@ export interface FeedEngineMeta {
   ingestProfile: IngestProfile | "analyze";
   config: FeedAlgorithmConfig;
   ingestedCount: number;
-  /** Detected tourism density — determines which classicMinReviews was applied */
+  /** Detected tourism density — drives vibe/classic review bands */
   areaProfile: AreaProfile;
+  /** Counts used for areaProfile (auto status check) */
+  areaDensity: {
+    countGte1000: number;
+    countGte2000: number;
+    probedRadiusM: number;
+  };
   cacheInRadius?: {
     total: number;
     fresh: number;
@@ -141,7 +145,10 @@ async function queryEligiblePools(
   }
 
   const [{ data: classicRaw }, { data: vibeRaw }] = await Promise.all([
-    base().gte("user_rating_count", config.classicMinReviews).limit(120),
+    base()
+      .gte("user_rating_count", config.classicMinReviews)
+      .lte("user_rating_count", config.classicMaxReviews)
+      .limit(120),
     vibeQuery.limit(120),
   ]);
 
@@ -182,12 +189,12 @@ function buildFeedPoolWithDebug(
   config: FeedAlgorithmConfig,
 ): { rows: SpotRow[]; assignments: Map<string, FeedSlotSource> } {
   const eligibleClassic = classic.filter((s) => !excluded.has(s.id));
-  const { slotPool: classicSlotPool, fillPool: classicFillPool } =
-    splitClassicByProminence(
-      eligibleClassic,
-      config.classicMegaReviewThreshold,
-    );
-  const vibePool = shuffle(vibe.filter((s) => !excluded.has(s.id)));
+  const { slotPool: classicSlotPool } = splitClassicByProminence(
+    eligibleClassic,
+    config.classicMegaReviewThreshold,
+  );
+  // Gem-first: rank vibe by hidden-gem score (low reviews, solid rating, ≥1 photo)
+  const vibePool = rankVibePool(vibe.filter((s) => !excluded.has(s.id)));
   const merged: SpotRow[] = [];
   const assignments = new Map<string, FeedSlotSource>();
   const seen = new Set<string>();
@@ -228,7 +235,8 @@ function buildFeedPoolWithDebug(
     if (csi >= classicSlotPool.length && vi >= vibePool.length) break;
   }
 
-  for (const row of [...vibePool.slice(vi), ...classicFillPool]) {
+  // Fill with remaining vibe only — never pad with classic/famous spots
+  for (const row of vibePool.slice(vi)) {
     if (merged.length >= config.feedBatchSize) break;
     if (seen.has(row.id) || excluded.has(row.id)) continue;
     seen.add(row.id);
@@ -341,15 +349,10 @@ export async function runFeedAnalyze(
   const { lat, lng, tag, excludeIds = [] } = opts;
   const allExcluded = new Set(excludeIds);
 
-  const initialBox = boundingBox(lat, lng, config.radiusStepsM[0]);
-  const { profile: areaProfile, effectiveClassicMin } = await detectAreaProfile(
-    initialBox,
-    config.classicMinReviews,
-  );
-  const effectiveConfig: typeof config =
-    effectiveClassicMin !== config.classicMinReviews
-      ? { ...config, classicMinReviews: effectiveClassicMin }
-      : config;
+  // Auto status check across all radius steps (not only 2km).
+  let areaDensity = await resolveAreaProfile(lat, lng, config.radiusStepsM);
+  let areaProfile = areaDensity.profile;
+  let effectiveConfig = applyAreaGemBands(config, areaProfile);
 
   let spots: SpotRow[] = [];
   let assignments = new Map<string, FeedSlotSource>();
@@ -366,6 +369,23 @@ export async function runFeedAnalyze(
   for (let step = 0; step < effectiveConfig.radiusStepsM.length; step++) {
     const radiusM = effectiveConfig.radiusStepsM[step];
     const box = boundingBox(lat, lng, radiusM);
+
+    // Re-check density at this radius; escalate bands if cache is denser here.
+    const stepCounts = await countAreaDensity(box);
+    const stepProfile = profileFromDensity(
+      stepCounts.countGte1000,
+      stepCounts.countGte2000,
+    );
+    if (denserAreaProfile(stepProfile, areaProfile) === stepProfile) {
+      areaProfile = stepProfile;
+      areaDensity = {
+        profile: stepProfile,
+        ...stepCounts,
+        probedRadiusM: radiusM,
+      };
+      effectiveConfig = applyAreaGemBands(config, areaProfile);
+    }
+
     const queryStart = Date.now();
     const { classic, vibe, rawClassic, rawVibe } = await queryEligiblePools(
       box,
@@ -383,11 +403,11 @@ export async function runFeedAnalyze(
 
     eligibleAtRadius = countEligible(classic, vibe, allExcluded);
     const batch = buildFeedPoolWithDebug(classic, vibe, allExcluded, effectiveConfig);
+    usedRadiusM = radiusM;
 
     if (batch.rows.length > spots.length) {
       spots = batch.rows;
       assignments = batch.assignments;
-      usedRadiusM = radiusM;
     }
 
     if (eligibleAtRadius >= effectiveConfig.minEligibleSpots) break;
@@ -465,6 +485,11 @@ export async function runFeedAnalyze(
       config: effectiveConfig,
       ingestedCount: 0,
       areaProfile,
+      areaDensity: {
+        countGte1000: areaDensity.countGte1000,
+        countGte2000: areaDensity.countGte2000,
+        probedRadiusM: areaDensity.probedRadiusM,
+      },
       cacheInRadius: {
         total: totalInRadius,
         fresh: freshInRadius,
@@ -485,18 +510,16 @@ async function countSpotsInBox(box: ReturnType<typeof boundingBox>): Promise<num
   return count ?? 0;
 }
 
-/**
- * Detect local tourism density by counting cached spots above two review thresholds.
- * Uses two parallel HEAD-only COUNT queries (no rows transferred).
- *
- * Returns an adjusted classicMinReviews that is always >= the config default, so
- * spots with 500–1999 reviews become "vibe" in dense tourist / urban areas — giving
- * the feed engine a much larger vibe pool to draw from without any Google API calls.
- */
-async function detectAreaProfile(
+export interface AreaDensityProbe {
+  profile: AreaProfile;
+  countGte1000: number;
+  countGte2000: number;
+  probedRadiusM: number;
+}
+
+async function countAreaDensity(
   box: ReturnType<typeof boundingBox>,
-  configClassicMin: number,
-): Promise<{ profile: AreaProfile; effectiveClassicMin: number }> {
+): Promise<{ countGte1000: number; countGte2000: number }> {
   const base = () =>
     supabaseAdmin
       .from("spots")
@@ -511,22 +534,47 @@ async function detectAreaProfile(
     base().gte("user_rating_count", 1000),
   ]);
 
-  let profile: AreaProfile;
-  let detectedMin: number;
+  return {
+    countGte1000: count1000 ?? 0,
+    countGte2000: count2000 ?? 0,
+  };
+}
 
-  if ((count2000 ?? 0) >= 15) {
-    profile = "tourist";
-    detectedMin = 2000;
-  } else if ((count1000 ?? 0) >= 20) {
-    profile = "urban";
-    detectedMin = 1000;
-  } else {
-    profile = "local";
-    detectedMin = configClassicMin;
+function profileFromDensity(countGte1000: number, countGte2000: number): AreaProfile {
+  if (countGte2000 >= 15) return "tourist";
+  if (countGte1000 >= 20) return "urban";
+  return "local";
+}
+
+/**
+ * Probe every radius step and keep the densest profile.
+ * Admin DB-analyze often has thin 2km cache; mega spots show up at 5–10km.
+ */
+async function resolveAreaProfile(
+  lat: number,
+  lng: number,
+  radiusStepsM: number[],
+): Promise<AreaDensityProbe> {
+  const steps = radiusStepsM.length > 0 ? radiusStepsM : [2_000];
+  let best: AreaDensityProbe = {
+    profile: "local",
+    countGte1000: 0,
+    countGte2000: 0,
+    probedRadiusM: steps[0],
+  };
+
+  for (const radiusM of steps) {
+    const { countGte1000, countGte2000 } = await countAreaDensity(
+      boundingBox(lat, lng, radiusM),
+    );
+    const profile = profileFromDensity(countGte1000, countGte2000);
+    if (denserAreaProfile(profile, best.profile) === profile) {
+      best = { profile, countGte1000, countGte2000, probedRadiusM: radiusM };
+    }
+    if (profile === "tourist") break;
   }
 
-  // Never lower the config-specified threshold (respects admin overrides).
-  return { profile, effectiveClassicMin: Math.max(configClassicMin, detectedMin) };
+  return best;
 }
 
 export async function runFeedEngine(
@@ -538,17 +586,17 @@ export async function runFeedEngine(
   const { lat, lng, tag, excludeIds = [], skipHydrate = false, forceIngest = false } = opts;
   const allExcluded = new Set(excludeIds);
 
-  // Detect tourism density before the loop so every radius step uses the same threshold.
-  // Uses the initial (smallest) radius box — cold start returns "local" (default).
-  const initialBox = boundingBox(lat, lng, config.radiusStepsM[0]);
-  const { profile: areaProfile, effectiveClassicMin } = await detectAreaProfile(
-    initialBox,
-    config.classicMinReviews,
+  // Scale gem bands to local density (local≈Sapporo, tourist≈Tokyo).
+  // Probe all radius steps up front so Admin / cold cache still picks tourist.
+  let areaDensity = await resolveAreaProfile(
+    lat,
+    lng,
+    ingestProfile === "production"
+      ? config.radiusStepsM.filter((r) => r <= 5_000)
+      : config.radiusStepsM,
   );
-  const effectiveConfig: typeof config =
-    effectiveClassicMin !== config.classicMinReviews
-      ? { ...config, classicMinReviews: effectiveClassicMin }
-      : config;
+  let areaProfile = areaDensity.profile;
+  let effectiveConfig = applyAreaGemBands(config, areaProfile);
 
   let spots: SpotRow[] = [];
   let assignments = new Map<string, FeedSlotSource>();
@@ -584,6 +632,7 @@ export async function runFeedEngine(
       lat,
       lng,
       radiusMeters: radiusM,
+      excludedIds: excludeIds,
       forceFetch: shouldForce,
       ingestProfile,
       bypassCooldown: forceIngest,
@@ -594,6 +643,25 @@ export async function runFeedEngine(
     totalApiCalls.nearbySearch += ingestResult.apiCalls.nearbySearch;
     totalApiCalls.textSearch += ingestResult.apiCalls.textSearch;
     ingestMs += Date.now() - ingestStart;
+
+    // After ingest, density may jump (cold Tokyo → tourist). Re-band before query.
+    if (ingestResult.ingested > 0 || step === 0) {
+      const boxForProfile = boundingBox(lat, lng, radiusM);
+      const stepCounts = await countAreaDensity(boxForProfile);
+      const stepProfile = profileFromDensity(
+        stepCounts.countGte1000,
+        stepCounts.countGte2000,
+      );
+      if (denserAreaProfile(stepProfile, areaProfile) === stepProfile) {
+        areaProfile = stepProfile;
+        areaDensity = {
+          profile: stepProfile,
+          ...stepCounts,
+          probedRadiusM: radiusM,
+        };
+        effectiveConfig = applyAreaGemBands(config, areaProfile);
+      }
+    }
 
     const box = boundingBox(lat, lng, radiusM);
     const queryStart = Date.now();
@@ -705,6 +773,11 @@ export async function runFeedEngine(
       config: effectiveConfig,
       ingestedCount,
       areaProfile,
+      areaDensity: {
+        countGte1000: areaDensity.countGte1000,
+        countGte2000: areaDensity.countGte2000,
+        probedRadiusM: areaDensity.probedRadiusM,
+      },
     },
   };
 }

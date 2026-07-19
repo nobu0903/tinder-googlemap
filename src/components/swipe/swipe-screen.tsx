@@ -1,35 +1,63 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MobileShell } from "@/components/layout/mobile-shell";
 import { BottomNav } from "@/components/layout/bottom-nav";
 import { SwipeCard } from "@/components/swipe/swipe-card";
 import { NativeAdCard } from "@/components/swipe/native-ad-card";
 import { SwipeActions } from "@/components/swipe/swipe-actions";
+import { SwipeableCard } from "@/components/swipe/swipeable-card";
 import { LocationPicker } from "@/components/location/location-picker";
 import { useSwipeFeed } from "@/lib/hooks/use-swipe-feed";
 import { useAuth } from "@/lib/hooks/use-auth";
 import { useLocation } from "@/lib/hooks/use-location";
+import { useFreeSwipeQuota } from "@/lib/hooks/use-free-swipe-quota";
 import { EXPLORE_THEMES } from "@/lib/explore-mock";
-import { isFeedNativeAd } from "@/types/backend";
+import {
+  feedItemKey,
+  isFeedNativeAd,
+  type SwipeAction,
+} from "@/types/backend";
 
 export function SwipeScreen() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tag = searchParams.get("tag") ?? undefined;
   const themeId = searchParams.get("theme") ?? undefined;
+  const latParam = searchParams.get("lat");
+  const lngParam = searchParams.get("lng");
+  const labelParam = searchParams.get("label");
   const isThemedSwipe = Boolean(tag);
 
   const { accessToken, isLoading: authLoading, session } = useAuth();
   const { coords, status, setManualCoords } = useLocation();
-  const [locationLabel, setLocationLabel] = useState<string | null>(null);
+  const { used, limit, isLimitReached, consume } = useFreeSwipeQuota();
+  const [locationLabel, setLocationLabel] = useState<string | null>(
+    labelParam ?? null,
+  );
   const [moreInfoOpen, setMoreInfoOpen] = useState(false);
+  const [pickingLocation, setPickingLocation] = useState(false);
+  const swipeTriggerRef = useRef<((action: SwipeAction) => void) | null>(null);
 
   const themeName = useMemo(() => {
     if (!themeId) return null;
     return EXPLORE_THEMES.find((t) => t.id === themeId)?.name ?? null;
   }, [themeId]);
+
+  // Apply URL-provided coords when GPS is denied (e.g. user picked location in Explore)
+  const urlCoordsApplied = useRef(false);
+  useEffect(() => {
+    if (urlCoordsApplied.current) return;
+    if (status !== "denied" && status !== "unsupported") return;
+    if (!latParam || !lngParam) return;
+    const lat = parseFloat(latParam);
+    const lng = parseFloat(lngParam);
+    if (isNaN(lat) || isNaN(lng)) return;
+    urlCoordsApplied.current = true;
+    setManualCoords({ lat, lng });
+  }, [status, latParam, lngParam, setManualCoords]);
 
   useEffect(() => {
     if (!isThemedSwipe || authLoading) return;
@@ -42,13 +70,16 @@ export function SwipeScreen() {
   const feedEnabled =
     Boolean(coords) &&
     (!isThemedSwipe || Boolean(session)) &&
-    status === "ready";
+    status === "ready" &&
+    !isLimitReached &&
+    !pickingLocation;
 
   const {
     currentItem,
     isInitialLoading,
     isRefetching,
     error,
+    isSparseTheme,
     recordSwipe,
   } = useSwipeFeed({
     tag,
@@ -57,21 +88,69 @@ export function SwipeScreen() {
     enabled: feedEnabled,
   });
 
+  const handleSwipe = (action: SwipeAction) => {
+    if (!currentItem) return;
+    // Ads don't consume the free-tier quota
+    if (!isFeedNativeAd(currentItem)) {
+      if (isLimitReached) return;
+      consume();
+    }
+    recordSwipe(action);
+  };
+
+  const handleLocationConfirm = (
+    nextCoords: { lat: number; lng: number },
+    label: string,
+  ) => {
+    setManualCoords(nextCoords);
+    setLocationLabel(label);
+    setPickingLocation(false);
+  };
+
   const needsLocationPicker =
-    status === "denied" || status === "unsupported";
+    (status === "denied" || status === "unsupported") && !pickingLocation;
 
   const showLocating = status === "locating" || status === "idle";
   const showAuthGate = isThemedSwipe && (authLoading || !session);
+  const showLimitGate = isLimitReached && !showAuthGate;
   const showFullScreenLoading =
     !needsLocationPicker &&
+    !pickingLocation &&
     !showAuthGate &&
+    !showLimitGate &&
     (showLocating || (isInitialLoading && !currentItem));
-  const showCard = !showLocating && !needsLocationPicker && !showAuthGate && currentItem;
+  const showEmpty =
+    !showFullScreenLoading &&
+    !needsLocationPicker &&
+    !pickingLocation &&
+    !showAuthGate &&
+    !showLimitGate &&
+    !error &&
+    !currentItem;
+  const showError =
+    !showFullScreenLoading &&
+    !needsLocationPicker &&
+    !pickingLocation &&
+    !showAuthGate &&
+    !showLimitGate &&
+    error &&
+    !currentItem;
+  const showCard =
+    !showLocating &&
+    !needsLocationPicker &&
+    !pickingLocation &&
+    !showAuthGate &&
+    !showLimitGate &&
+    currentItem;
+
+  const displayLocation =
+    locationLabel ?? (status === "ready" ? "Near you" : null);
+  const nearLimit = used >= limit - 5 && used < limit;
 
   return (
     <MobileShell>
       <main className="flex min-h-0 flex-1 flex-col px-4 pb-28 pt-6">
-        <header className="mb-4 shrink-0 flex flex-col items-center">
+        <header className="mb-4 flex shrink-0 flex-col items-center">
           <h1 className="text-sm font-bold tracking-[0.18em] text-electric-chilli drop-shadow-[0_0_8px_rgba(224,62,0,0.25)]">
             🔥 SWIPE
           </h1>
@@ -80,8 +159,26 @@ export function SwipeScreen() {
               Theme: <span className="text-text-primary">{themeName}</span>
             </p>
           )}
-          {locationLabel && (
-            <p className="mt-1 text-[10px] text-stealth">📍 {locationLabel}</p>
+          {displayLocation && !showLimitGate && (
+            <button
+              type="button"
+              onClick={() => setPickingLocation(true)}
+              className="mt-1 text-[10px] text-stealth transition-colors hover:text-text-muted"
+            >
+              📍 {displayLocation}
+              <span className="ml-1 text-text-muted/70 underline underline-offset-2">
+                Change
+              </span>
+            </button>
+          )}
+          {!showLimitGate && (
+            <p
+              className={`mt-1.5 text-[11px] font-semibold tabular-nums ${
+                nearLimit ? "text-electric-chilli" : "text-text-muted/70"
+              }`}
+            >
+              {used} / {limit}
+            </p>
           )}
           <span
             aria-hidden
@@ -91,37 +188,88 @@ export function SwipeScreen() {
 
         {showAuthGate && (
           <div className="flex flex-1 items-center justify-center">
-            <p className="text-sm text-text-muted animate-pulse">Checking sign-in…</p>
+            <p className="animate-pulse text-sm text-text-muted">
+              Checking sign-in…
+            </p>
           </div>
         )}
 
-        {needsLocationPicker && !showAuthGate && (
-          <LocationPicker
-            onConfirm={(nextCoords, label) => {
-              setManualCoords(nextCoords);
-              setLocationLabel(label);
-            }}
-          />
+        {showLimitGate && (
+          <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
+            <p className="text-sm font-bold tracking-[0.14em] text-electric-chilli">
+              FREE LIMIT
+            </p>
+            <h2 className="mt-3 text-xl font-black text-text-primary">
+              You&apos;ve used all {limit} free swipes
+            </h2>
+            <p className="mt-2.5 max-w-[260px] text-sm leading-relaxed text-text-muted">
+              Upgrade to Pro for unlimited swipes. The free limit is absolute —
+              changing areas does not give you more.
+            </p>
+            <Link
+              href="/pro"
+              className="mt-8 flex h-12 w-full max-w-[240px] items-center justify-center rounded-xl bg-electric-chilli text-sm font-bold text-text-primary shadow-[0_4px_20px_rgba(224,62,0,0.35)] transition-all active:scale-[0.98] hover:shadow-[0_6px_28px_rgba(224,62,0,0.5)]"
+            >
+              Go Pro
+            </Link>
+          </div>
+        )}
+
+        {(needsLocationPicker || pickingLocation) &&
+          !showAuthGate &&
+          !showLimitGate && (
+            <LocationPicker onConfirm={handleLocationConfirm} />
+          )}
+
+        {pickingLocation && !showAuthGate && !showLimitGate && (
+          <button
+            type="button"
+            onClick={() => setPickingLocation(false)}
+            className="mt-3 text-center text-[12px] text-text-muted underline underline-offset-2"
+          >
+            Cancel
+          </button>
         )}
 
         {showFullScreenLoading && (
           <div className="flex flex-1 items-center justify-center">
-            <p className="text-sm text-text-muted animate-pulse">
+            <p className="animate-pulse text-sm text-text-muted">
               {showLocating ? "Finding your location…" : "Loading spots…"}
             </p>
           </div>
         )}
 
-        {!showFullScreenLoading && !needsLocationPicker && !showAuthGate && error && !currentItem && (
-          <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-            <p className="text-sm font-semibold text-text-primary">Could not load spots</p>
+        {showError && (
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+            <p className="text-sm font-semibold text-text-primary">
+              Could not load spots
+            </p>
             <p className="text-xs leading-relaxed text-text-muted">{error}</p>
+            <button
+              type="button"
+              onClick={() => setPickingLocation(true)}
+              className="mt-2 flex h-11 w-full max-w-[240px] items-center justify-center rounded-xl bg-electric-chilli text-sm font-bold text-text-primary shadow-[0_4px_16px_rgba(224,62,0,0.35)] transition-transform active:scale-[0.98]"
+            >
+              Search another area
+            </button>
           </div>
         )}
 
-        {!showFullScreenLoading && !needsLocationPicker && !showAuthGate && !error && !currentItem && (
-          <div className="flex flex-1 items-center justify-center px-6 text-center">
-            <p className="text-sm text-text-muted">No spots found nearby. Try again later.</p>
+        {showEmpty && (
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+            <p className="text-sm font-semibold text-text-primary">
+              No spots found nearby
+            </p>
+            <p className="max-w-[260px] text-xs leading-relaxed text-text-muted">
+              Try a different city or neighborhood — great for travel mode.
+            </p>
+            <button
+              type="button"
+              onClick={() => setPickingLocation(true)}
+              className="mt-2 flex h-11 w-full max-w-[240px] items-center justify-center rounded-xl bg-electric-chilli text-sm font-bold text-text-primary shadow-[0_4px_16px_rgba(224,62,0,0.35)] transition-transform active:scale-[0.98]"
+            >
+              Search another area
+            </button>
           </div>
         )}
 
@@ -132,17 +280,50 @@ export function SwipeScreen() {
                 Loading more spots…
               </p>
             )}
+            {isThemedSwipe && isSparseTheme && !isRefetching && (
+              <p className="mb-2 text-center text-[10px] font-medium text-text-muted/60">
+                ⚡ Limited themed spots nearby — showing top-rated alternatives
+                too
+              </p>
+            )}
             <div className="relative flex min-h-0 flex-1 flex-col">
-              {isFeedNativeAd(currentItem) ? (
-                <NativeAdCard ad={currentItem} />
-              ) : (
-                <SwipeCard
-                  spot={currentItem}
-                  onMoreInfoOpenChange={setMoreInfoOpen}
-                />
-              )}
-              <SwipeActions hidden={moreInfoOpen} onSwipe={recordSwipe} />
+              <SwipeableCard
+                itemKey={feedItemKey(currentItem)}
+                disabled={moreInfoOpen}
+                onSwipe={handleSwipe}
+                swipeRef={swipeTriggerRef}
+              >
+                {isFeedNativeAd(currentItem) ? (
+                  <NativeAdCard ad={currentItem} />
+                ) : (
+                  <SwipeCard
+                    spot={currentItem}
+                    onMoreInfoOpenChange={setMoreInfoOpen}
+                    accessToken={accessToken}
+                    showDistance={!locationLabel}
+                  />
+                )}
+              </SwipeableCard>
+              <SwipeActions
+                hidden={moreInfoOpen}
+                onSwipe={(action) => {
+                  if (swipeTriggerRef.current) {
+                    swipeTriggerRef.current(action);
+                  } else {
+                    handleSwipe(action);
+                  }
+                }}
+              />
             </div>
+
+            {!authLoading && !session && !isThemedSwipe && (
+              <Link
+                href="/login?redirect=/"
+                className="mt-3 flex items-center justify-center gap-1.5 text-[11px] text-stealth transition-colors hover:text-text-muted"
+              >
+                <span>Sign in to save your likes →</span>
+              </Link>
+            )}
           </section>
         )}
       </main>

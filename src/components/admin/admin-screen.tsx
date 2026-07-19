@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import type { FeedAlgorithmConfig } from "@/lib/feed/config";
+import {
+  AREA_GEM_BANDS,
+  type AreaProfile,
+  type FeedAlgorithmConfig,
+  withoutAreaBandOverrides,
+} from "@/lib/feed/config";
 import type { FeedEngineResult } from "@/lib/feed/engine";
 import {
   formatGoogleMapsCoordinates,
@@ -41,6 +46,21 @@ function slotBadge(slot: string) {
   };
   return (
     <span className={`text-[10px] font-mono ${colors[slot] ?? ""}`}>{slot}</span>
+  );
+}
+
+function areaProfileBadge(profile: AreaProfile) {
+  const colors: Record<AreaProfile, string> = {
+    tourist: "bg-rose-900/50 text-rose-300 border-rose-800/60",
+    urban: "bg-sky-900/50 text-sky-300 border-sky-800/60",
+    local: "bg-neutral-800 text-neutral-300 border-neutral-700",
+  };
+  return (
+    <span
+      className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${colors[profile]}`}
+    >
+      {profile}
+    </span>
   );
 }
 
@@ -126,13 +146,19 @@ export function AdminScreen() {
         body: JSON.stringify({
           lat,
           lng,
-          config: configForm,
+          // Bands are auto from area status; only slots / vibeMin etc. apply.
+          config: withoutAreaBandOverrides(configForm),
         }),
       });
       setPreview(data);
       const cache = data.meta.cacheInRadius;
+      const density = data.meta.areaDensity;
       setStatus(
-        `DB 分析: ${data.meta.mix.vibeInFeed} vibe / ${data.meta.mix.classicInFeed} classic · キャッシュ ${cache?.fresh ?? 0} fresh / ${cache?.total ?? 0} total · API 0回`,
+        `DB 分析: area=${data.meta.areaProfile}` +
+          (density
+            ? ` (≥1000:${density.countGte1000} / ≥2000:${density.countGte2000} @ ${density.probedRadiusM / 1000}km)`
+            : "") +
+          ` · ${data.meta.mix.vibeInFeed} vibe / ${data.meta.mix.classicInFeed} classic · キャッシュ ${cache?.fresh ?? 0} fresh / ${cache?.total ?? 0} total · API 0回`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Analyze failed");
@@ -200,7 +226,7 @@ export function AdminScreen() {
         lat,
         lng,
         coordinatesLabel: coordinates,
-        config: { ...configForm },
+        config: withoutAreaBandOverrides(configForm),
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invalid coordinates");
@@ -282,12 +308,17 @@ export function AdminScreen() {
           </h2>
           <ul className="list-inside list-disc space-y-1 leading-relaxed">
             <li>
+              <strong className="text-neutral-300">エリア帯</strong>
+              ：DB 分析・スワイプともキャッシュ密度で local / urban / tourist
+              を自動判定し、レビュー帯を切り替える
+            </li>
+            <li>
               <strong className="text-neutral-300">メイン</strong>
               ：「この設定でスワイプ」＝本番同等（キャッシュ優先・軽量 API）
             </li>
             <li>
               <strong className="text-neutral-300">DB 分析</strong>
-              ：Google API 0回。キャッシュ済みデータのミックス確認
+              ：Google API 0回。自動帯＋キャッシュ済みデータのミックス確認
             </li>
             <li>
               <strong className="text-neutral-300">データ投入</strong>
@@ -295,14 +326,14 @@ export function AdminScreen() {
             </li>
             <li>
               <strong className="text-neutral-300">本番スワイプ (/api/swipe)</strong>
-              ：Save config した値のみ
+              ：Save config のスロット比など ＋ リクエスト時の自動帯
             </li>
           </ul>
           {config && (
             <p className="mt-3 font-mono text-[10px] text-neutral-600">
-              本番に保存済み: Classic≥{config.classicMinReviews} · Vibe{" "}
-              {config.vibeMinReviews}–{config.vibeMaxReviews} · 比率{" "}
-              {config.classicSlotsPerCycle}:{config.vibeSlotsPerCycle}
+              本番に保存済み: vibeMin {config.vibeMinReviews} · 比率{" "}
+              {config.classicSlotsPerCycle}:{config.vibeSlotsPerCycle} ·
+              （Classic/Vibe 上限はエリア自動）
             </p>
           )}
         </section>
@@ -385,14 +416,33 @@ export function AdminScreen() {
                 {preview.meta.cacheInRadius.vibe} 件
               </p>
             )}
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <span className="text-[10px] uppercase tracking-wider text-neutral-500">
+                Area status
+              </span>
+              {areaProfileBadge(preview.meta.areaProfile)}
+              {preview.meta.areaDensity && (
+                <span className="font-mono text-[10px] text-neutral-500">
+                  ≥1000: {preview.meta.areaDensity.countGte1000} · ≥2000:{" "}
+                  {preview.meta.areaDensity.countGte2000} · probed{" "}
+                  {preview.meta.areaDensity.probedRadiusM / 1000} km
+                </span>
+              )}
+            </div>
             <p className="mb-3 font-mono text-[10px] text-neutral-600">
-              このプレビューで使用: Classic≥{preview.meta.config.classicMinReviews}{" "}
-              · Vibe {preview.meta.config.vibeMinReviews}–
+              自動帯 ({preview.meta.areaProfile}): Classic{" "}
+              {preview.meta.config.classicMinReviews}–
+              {preview.meta.config.classicMaxReviews} · Vibe{" "}
+              {preview.meta.config.vibeMinReviews}–
               {preview.meta.config.vibeMaxReviews} · スロット比率{" "}
               {preview.meta.config.classicSlotsPerCycle}:
               {preview.meta.config.vibeSlotsPerCycle}
             </p>
             <div className="grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+              <Stat
+                label="Area profile"
+                value={preview.meta.areaProfile}
+              />
               <Stat label="Radius" value={`${preview.meta.radiusKm} km`} />
               <Stat
                 label="Eligible in radius"
@@ -517,24 +567,10 @@ export function AdminScreen() {
           {config && (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <ConfigField
-                label="Classic min reviews"
-                value={configForm.classicMinReviews}
-                onChange={(v) =>
-                  setConfigForm((f) => ({ ...f, classicMinReviews: Number(v) }))
-                }
-              />
-              <ConfigField
-                label="Vibe min reviews"
+                label="Vibe min reviews (noise floor)"
                 value={configForm.vibeMinReviews}
                 onChange={(v) =>
                   setConfigForm((f) => ({ ...f, vibeMinReviews: Number(v) }))
-                }
-              />
-              <ConfigField
-                label="Vibe max reviews"
-                value={configForm.vibeMaxReviews}
-                onChange={(v) =>
-                  setConfigForm((f) => ({ ...f, vibeMaxReviews: Number(v) }))
                 }
               />
               <ConfigField
@@ -577,6 +613,23 @@ export function AdminScreen() {
               />
             </div>
           )}
+          <div className="mt-4 rounded border border-neutral-800 bg-neutral-950/50 px-3 py-2 text-[10px] text-neutral-500">
+            <p className="mb-1 font-semibold uppercase tracking-wider text-neutral-400">
+              Auto area bands（テスト時は自動適用・フォームでは上書き不可）
+            </p>
+            <ul className="space-y-0.5 font-mono">
+              {(Object.keys(AREA_GEM_BANDS) as AreaProfile[]).map((key) => {
+                const band = AREA_GEM_BANDS[key];
+                return (
+                  <li key={key}>
+                    {key}: vibe {configForm.vibeMinReviews ?? 60}–
+                    {band.vibeMaxReviews} · classic {band.classicMinReviews}–
+                    {band.classicMaxReviews}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
           <div className="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
@@ -596,7 +649,7 @@ export function AdminScreen() {
             </button>
           </div>
           <p className="mt-2 text-[10px] text-neutral-600">
-            スワイプ・DB 分析はフォームの値で即反映。本番に反映するには Save config。
+            DB 分析・スワイプはエリア密度を自動判定して帯を決めます。スロット比などはフォームが即反映。本番に反映するには Save config。
           </p>
         </section>
 

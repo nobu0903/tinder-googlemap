@@ -26,6 +26,11 @@ interface SwipeCardProps {
 
   onMoreInfoOpenChange?: (open: boolean) => void;
 
+  accessToken?: string | null;
+
+  /** Only show distance for GPS nearby search — hide for travel / picked areas */
+  showDistance?: boolean;
+
 }
 
 
@@ -233,6 +238,10 @@ export function SwipeCard({
 
   onMoreInfoOpenChange,
 
+  accessToken,
+
+  showDistance = true,
+
 }: SwipeCardProps) {
 
   const pages = useMemo(
@@ -392,17 +401,21 @@ export function SwipeCard({
 
 
 
-        <div className="absolute right-4 top-9 z-20">
+        {showDistance && (
 
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-black/55 px-3 py-1.5 text-xs font-medium text-text-primary backdrop-blur-sm ring-1 ring-white/10">
+          <div className="absolute right-4 top-9 z-20">
 
-            <MapPin className="size-3.5 text-text-muted" />
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-black/55 px-3 py-1.5 text-xs font-medium text-text-primary backdrop-blur-sm ring-1 ring-white/10">
 
-            {spot.distanceKm} km away
+              <MapPin className="size-3.5 text-text-muted" />
 
-          </span>
+              {spot.distanceKm} km away
 
-        </div>
+            </span>
+
+          </div>
+
+        )}
 
 
 
@@ -529,6 +542,8 @@ export function SwipeCard({
         onClose={() => setMoreInfoOpen(false)}
 
         spot={spot}
+
+        accessToken={accessToken}
 
       />
 

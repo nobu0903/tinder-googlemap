@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { adminUnauthorized, verifyAdminRequest } from "@/lib/admin/auth";
-import { getFeedConfig } from "@/lib/feed/config";
+import { getFeedConfig, withoutAreaBandOverrides } from "@/lib/feed/config";
 import { runFeedEngine } from "@/lib/feed/engine";
 
 const QuerySchema = z.object({
@@ -20,6 +20,7 @@ const QuerySchema = z.object({
 
 const ConfigOverrideSchema = z.object({
   classicMinReviews: z.number().int().min(0).optional(),
+  classicMaxReviews: z.number().int().min(0).optional(),
   vibeMinReviews: z.number().int().min(0).optional(),
   vibeMaxReviews: z.number().int().min(0).optional(),
   classicSlotsPerCycle: z.number().int().min(0).optional(),
@@ -50,7 +51,7 @@ async function runPreview(opts: {
 }) {
   const baseConfig = getFeedConfig();
   const mergedConfig = opts.config
-    ? { ...baseConfig, ...opts.config }
+    ? { ...baseConfig, ...withoutAreaBandOverrides(opts.config) }
     : baseConfig;
 
   return runFeedEngine({

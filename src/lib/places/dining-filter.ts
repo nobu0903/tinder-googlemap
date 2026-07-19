@@ -50,6 +50,58 @@ export const API_EXCLUDED_LODGING_TYPES = [
 /** @deprecated Use API_EXCLUDED_LODGING_TYPES for API requests */
 export const EXCLUDED_LODGING_TYPES = [...API_EXCLUDED_LODGING_TYPES];
 
+/**
+ * Food & drink primary types from Places Table A (and common response values).
+ * Used so feed filtering does not drop coffee shops, steak houses, etc.
+ */
+export const DINING_PRIMARY_TYPES = new Set([
+  "restaurant",
+  "cafe",
+  "coffee_shop",
+  "bar",
+  "pub",
+  "wine_bar",
+  "bakery",
+  "meal_takeaway",
+  "meal_delivery",
+  "food",
+  "sandwich_shop",
+  "steak_house",
+  "ice_cream_shop",
+  "juice_shop",
+  "tea_house",
+  "brunch_restaurant",
+  "breakfast_restaurant",
+  "fast_food_restaurant",
+  "hamburger_restaurant",
+  "pizza_restaurant",
+  "seafood_restaurant",
+  "sushi_restaurant",
+  "ramen_restaurant",
+  "japanese_restaurant",
+  "chinese_restaurant",
+  "korean_restaurant",
+  "thai_restaurant",
+  "vietnamese_restaurant",
+  "indian_restaurant",
+  "indonesian_restaurant",
+  "italian_restaurant",
+  "french_restaurant",
+  "american_restaurant",
+  "mexican_restaurant",
+  "mediterranean_restaurant",
+  "middle_eastern_restaurant",
+  "greek_restaurant",
+  "spanish_restaurant",
+  "brazilian_restaurant",
+  "lebanese_restaurant",
+  "turkish_restaurant",
+  "vegan_restaurant",
+  "vegetarian_restaurant",
+  "barbecue_restaurant",
+  "fine_dining_restaurant",
+]);
+
 const DINING_KEYWORDS =
   /レストラン|餐厅|食堂|ダイニング|ビストロ|dining|restaurant|bistro|grill|kitchen|café|cafe|カフェ|バー|bar|料理|diner|eatery/i;
 
@@ -62,17 +114,25 @@ export function isPureHotelName(name: string): boolean {
   return !DINING_KEYWORDS.test(name);
 }
 
-function primaryTypeIsDining(primaryType: string): boolean {
+/**
+ * Accept known dining types + any `*_restaurant` / cafe|bar|bakery|meal_* patterns.
+ * Unknown non-lodging types are NOT dining (avoids tourist_attraction etc. in feed).
+ */
+export function primaryTypeIsDining(primaryType: string): boolean {
   if (!primaryType) return true;
   if (LODGING_PRIMARY_TYPES.has(primaryType)) return false;
-  return (
-    primaryType.includes("restaurant") ||
+  if (DINING_PRIMARY_TYPES.has(primaryType)) return true;
+  if (primaryType.endsWith("_restaurant")) return true;
+  if (
     primaryType.includes("cafe") ||
-    primaryType === "bar" ||
-    primaryType === "bakery" ||
-    primaryType === "meal_takeaway" ||
-    primaryType === "food"
-  );
+    primaryType.includes("coffee") ||
+    primaryType.includes("bakery") ||
+    primaryType.includes("bar") ||
+    primaryType.startsWith("meal_")
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /** Filter a raw Google Places result before caching. */
@@ -83,9 +143,13 @@ export function isDiningPlace(place: GooglePlacesPlace): boolean {
 
   if (primary && LODGING_PRIMARY_TYPES.has(primary)) return false;
 
+  // Lodging in types[] but dining primary (e.g. hotel restaurant) → keep
   if (types.some((t) => LODGING_PRIMARY_TYPES.has(t))) {
     if (!primaryTypeIsDining(primary)) return false;
   }
+
+  // If Google gave a primary type, require it to be dining-related
+  if (primary && !primaryTypeIsDining(primary)) return false;
 
   if (isPureHotelName(name)) return false;
 

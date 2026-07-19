@@ -19,6 +19,44 @@ function parseExcludeParam(raw: string | undefined): string[] {
   return raw.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
+// ── Server-side rate limiter ──────────────────────────────────────────────────
+// Prevents runaway API costs from idle browsers, bots, or abuse.
+// Max 15 feed requests per hour per IP.
+// Note: in-memory — resets per serverless function instance (adds protection on top
+// of the DB-backed ingest cooldown, which is the cross-instance guard).
+
+const ipRateMap = new Map<string, { count: number; windowStart: number }>();
+const RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const RATE_LIMIT_PER_WINDOW = 15;
+
+function getClientIp(req: NextRequest): string {
+  return (
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    req.headers.get("x-real-ip") ??
+    "unknown"
+  );
+}
+
+function checkRateLimit(ip: string): { allowed: boolean; remaining: number } {
+  const now = Date.now();
+  const entry = ipRateMap.get(ip);
+
+  if (!entry || now - entry.windowStart >= RATE_WINDOW_MS) {
+    ipRateMap.set(ip, { count: 1, windowStart: now });
+    return { allowed: true, remaining: RATE_LIMIT_PER_WINDOW - 1 };
+  }
+
+  if (entry.count >= RATE_LIMIT_PER_WINDOW) {
+    const retryAfterMs = RATE_WINDOW_MS - (now - entry.windowStart);
+    return { allowed: false, remaining: 0 };
+  }
+
+  entry.count++;
+  return { allowed: true, remaining: RATE_LIMIT_PER_WINDOW - entry.count };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function GET(req: NextRequest) {
   try {
     return await handleSwipeFeed(req);
@@ -68,6 +106,23 @@ async function handleSwipeFeed(req: NextRequest) {
     );
   }
 
+  // Rate limit — applied after param parsing but before any expensive work
+  const ip = getClientIp(req);
+  const rateCheck = checkRateLimit(ip);
+  if (!rateCheck.allowed) {
+    return NextResponse.json(
+      { error: "Too many requests. Please slow down." },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(Math.ceil(RATE_WINDOW_MS / 1000)),
+          "X-RateLimit-Limit": String(RATE_LIMIT_PER_WINDOW),
+          "X-RateLimit-Remaining": "0",
+        },
+      },
+    );
+  }
+
   const { lat, lng, tag, exclude: excludeParam } = parsed.data;
 
   let userId: string | null = null;
@@ -107,6 +162,9 @@ async function handleSwipeFeed(req: NextRequest) {
   const response: SwipeFeedResponse = {
     spots: injectNativeAd(result.spots),
     radiusKm: result.meta.radiusKm,
+    ...(tag !== undefined
+      ? { vibeSpotCount: result.meta.pools.vibeAfterFilter }
+      : {}),
   };
 
   return NextResponse.json(response, {
@@ -114,6 +172,8 @@ async function handleSwipeFeed(req: NextRequest) {
       "Cache-Control": "no-store",
       "X-Api-Nearby": String(result.meta.apiCalls.nearbySearch),
       "X-Api-Details": String(result.meta.apiCalls.placeDetails),
+      "X-RateLimit-Limit": String(RATE_LIMIT_PER_WINDOW),
+      "X-RateLimit-Remaining": String(rateCheck.remaining),
     },
   });
 }

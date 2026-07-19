@@ -43,6 +43,8 @@ export function AdminSwipePanel({
     currentDebug,
     queueLength,
     sessionApiCalls,
+    areaProfile,
+    effectiveBands,
     isLoading,
     isRefetching,
     error,
@@ -51,6 +53,9 @@ export function AdminSwipePanel({
   } = useAdminSwipeFeed({ lat, lng, config, active: true });
 
   const apiSummary = `nearby ${sessionApiCalls.nearbySearch} · text ${sessionApiCalls.textSearch} · details ${sessionApiCalls.placeDetails}`;
+  const bandSummary = effectiveBands
+    ? `Classic ${effectiveBands.classicMin}–${effectiveBands.classicMax} · Vibe ${effectiveBands.vibeMin}–${effectiveBands.vibeMax}`
+    : `Classic ${config.classicMinReviews ?? "?"}–${config.classicMaxReviews ?? "?"} · Vibe ${config.vibeMinReviews ?? "?"}–${config.vibeMaxReviews ?? "?"}`;
 
   const showLoading = isLoading && !currentSpot;
 
@@ -75,8 +80,8 @@ export function AdminSwipePanel({
           </button>
         </div>
         <p className="mx-auto mt-1 max-w-[400px] font-mono text-[9px] text-neutral-600">
-          Classic≥{config.classicMinReviews} · Vibe {config.vibeMinReviews}–
-          {config.vibeMaxReviews} · {config.classicSlotsPerCycle}:
+          {areaProfile ? `area=${areaProfile} · ` : "area=… · "}
+          {bandSummary} · {config.classicSlotsPerCycle}:
           {config.vibeSlotsPerCycle} · API: {apiSummary}
         </p>
       </header>

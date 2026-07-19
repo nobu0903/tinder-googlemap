@@ -1,6 +1,16 @@
-/** Per-area ingest cooldown — limits repeated Google API bursts for the same location. */
+/**
+ * Per-area ingest cooldown — in-memory L1 cache for same-instance rapid requests.
+ *
+ * This is an L1 guard only.  For cross-serverless-instance protection we rely on
+ * the DB-backed `hadRecentIngestInBox` check in ingest.ts (checks updated_at on
+ * the spots table).  The two layers together make sure a fresh Lambda instance
+ * that hasn't seen an ingest yet will still check the DB before calling Google.
+ */
 
-const INGEST_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
+// 7 days — restaurant data rarely changes week-to-week. The DB-backed guard in
+// ingest.ts (PRODUCTION_INGEST_COOLDOWN_MS) is the cross-instance floor; this
+// in-memory cache extends it for same-instance rapid requests.
+const INGEST_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
 const lastIngestByArea = new Map<string, number>();
 

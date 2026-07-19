@@ -1,6 +1,13 @@
 "use client";
 
-import { ArrowRight } from "lucide-react";
+import { useState } from "react";
+import { ArrowRight, Check } from "lucide-react";
+import { buildGoogleMapsPlaceUrl } from "@/types/backend";
+
+interface ExportGoogleMapsButtonProps {
+  spotIds: string[];
+  spotNames: string[];
+}
 
 function GoogleMapsPinIcon() {
   return (
@@ -14,9 +21,31 @@ function GoogleMapsPinIcon() {
   );
 }
 
-export function ExportGoogleMapsButton() {
-  const handleExport = () => {
-    console.log("Export to Google Maps clicked");
+export function ExportGoogleMapsButton({
+  spotIds,
+  spotNames,
+}: ExportGoogleMapsButtonProps) {
+  const [copied, setCopied] = useState(false);
+
+  const handleExport = async () => {
+    if (spotIds.length === 0) return;
+
+    // Build a text list of Google Maps URLs for all liked spots
+    const lines = spotIds.map(
+      (id, i) =>
+        `${i + 1}. ${spotNames[i] ?? id}\n   ${buildGoogleMapsPlaceUrl(id, spotNames[i])}`,
+    );
+    const text = `My VibeLoop Collection (${spotIds.length} spots)\n\n${lines.join("\n\n")}`;
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      // Fallback: open first spot in Maps if clipboard is unavailable
+      const first = buildGoogleMapsPlaceUrl(spotIds[0], spotNames[0]);
+      window.open(first, "_blank");
+    }
   };
 
   return (
@@ -26,15 +55,25 @@ export function ExportGoogleMapsButton() {
       className="flex w-full items-center gap-3 rounded-2xl bg-gradient-to-r from-electric-chilli to-chilli-bright px-4 py-3.5 shadow-[0_6px_24px_rgba(224,62,0,0.45)] transition-transform active:scale-[0.98] hover:shadow-[0_8px_28px_rgba(224,62,0,0.55)]"
     >
       <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-white">
-        <GoogleMapsPinIcon />
+        {copied ? (
+          <Check className="size-5 text-basil" />
+        ) : (
+          <GoogleMapsPinIcon />
+        )}
       </div>
       <div className="min-w-0 flex-1 text-left">
         <p className="text-[15px] font-bold leading-tight text-text-primary">
-          Export to Google Maps
+          {copied ? "Copied to clipboard!" : "Export to Google Maps"}
         </p>
-        <p className="text-xs font-medium text-text-primary/80">Save all to your map</p>
+        <p className="text-xs font-medium text-text-primary/80">
+          {copied
+            ? "Paste your list anywhere"
+            : `Copy all ${spotIds.length} spot${spotIds.length !== 1 ? "s" : ""} as links`}
+        </p>
       </div>
-      <ArrowRight className="size-5 shrink-0 text-text-primary" />
+      {!copied && (
+        <ArrowRight className="size-5 shrink-0 text-text-primary" />
+      )}
     </button>
   );
 }

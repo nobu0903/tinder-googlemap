@@ -25,14 +25,20 @@ import {
 import { DEFAULT_FEED_CONFIG } from "@/lib/feed/config";
 
 const GOOGLE_PLACES_BASE = "https://places.googleapis.com/v1";
-const CACHE_TTL_DAYS = 14;
+const CACHE_TTL_DAYS = 30;
 /** Minimum review count to cache — matches feed noise floor (60) */
 const MIN_CACHE_REVIEW_COUNT = DEFAULT_FEED_CONFIG.vibeMinReviews;
 const MIN_CACHED_SPOTS = 20;
 /** Minimum vibe-range spots in cache before skipping supplemental ingest */
 const MIN_VIBE_CACHED_SPOTS = 15;
 /** Production: skip repeat nearby ingest if box had any upsert within this window */
-const PRODUCTION_INGEST_COOLDOWN_MS = 2 * 60 * 60 * 1000;
+const PRODUCTION_INGEST_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * When the area already has enough total spots but vibe (hidden-gem) count is low,
+ * allow one DISTANCE Nearby refresh at most once per this window. Much shorter than
+ * the full ingest cooldown so feeds don't stay stuck on the same famous-heavy cache.
+ */
+const VIBE_REFRESH_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 /** Chain-heavy types + top-level lodging types for searchNearby (Table A only) */
 const EXCLUDED_PRIMARY_TYPES = [
@@ -41,20 +47,34 @@ const EXCLUDED_PRIMARY_TYPES = [
   "hotel",
 ];
 
-/** Admin: full multi-type discovery */
-const ADMIN_NEARBY_TYPES = [
+/**
+ * Food & drink Table A types for searchNearby.
+ * Broader than restaurant/cafe/bar alone — coffee_shop / bakery were previously missed.
+ * (fast_food / hamburger / sandwich_shop still dropped later by chain-filter.)
+ */
+const FOOD_NEARBY_TYPES = [
   "restaurant",
   "cafe",
+  "coffee_shop",
   "bar",
   "bakery",
   "meal_takeaway",
 ];
 
+/** Admin: full multi-type discovery (same set; admin may split into per-type calls) */
+const ADMIN_NEARBY_TYPES = [...FOOD_NEARBY_TYPES];
+
 /** Production: combined nearby types — no Text Search */
-const PRODUCTION_NEARBY_TYPES = ["restaurant", "cafe", "bar"];
+const PRODUCTION_NEARBY_TYPES = [...FOOD_NEARBY_TYPES];
 
 /** Text queries with DISTANCE ranking (admin only) */
-const TEXT_SEARCH_QUERIES = ["restaurant", "cafe", "bar"];
+const TEXT_SEARCH_QUERIES = [
+  "restaurant",
+  "cafe",
+  "coffee shop",
+  "bar",
+  "bakery",
+];
 
 export type IngestProfile = "production" | "admin";
 
@@ -94,6 +114,9 @@ const DETAILS_FULL_FIELD_MASK = [
   "photos",
   "currentOpeningHours",
   "location",
+  // Advanced fields — used for Hotpepper phone-number matching and Google Reserve fallback
+  "nationalPhoneNumber",
+  "reservationUri",
 ].join(",");
 
 /** Photos-only details — cheapest refresh when search already cached metadata */
@@ -213,6 +236,11 @@ export function mapPlaceToRow(
     })(),
     created_at: existing?.created_at ?? new Date().toISOString(),
     updated_at: new Date().toISOString(),
+    // Booking / affiliate fields (populated during Details enrichment)
+    phone_number: place.nationalPhoneNumber ?? existing?.phone_number ?? null,
+    reservation_uri: place.reservationUri ?? existing?.reservation_uri ?? null,
+    hotpepper_url: existing?.hotpepper_url ?? null,
+    booking_url: existing?.booking_url ?? null,
   };
 }
 
@@ -310,8 +338,9 @@ async function fetchNearbyPlacesCombined(
   lng: number,
   radiusMeters: number,
   includedTypes: string[],
+  rankPreference?: "POPULARITY" | "DISTANCE",
 ): Promise<GooglePlacesPlace[]> {
-  const body = {
+  const body: Record<string, unknown> = {
     includedTypes,
     excludedTypes: ["lodging"],
     excludedPrimaryTypes: EXCLUDED_PRIMARY_TYPES,
@@ -323,6 +352,8 @@ async function fetchNearbyPlacesCombined(
       },
     },
   };
+  // DISTANCE surfaces nearer / less prominence-biased spots (better for gems)
+  if (rankPreference) body.rankPreference = rankPreference;
 
   const res = await fetch(`${GOOGLE_PLACES_BASE}/places:searchNearby`, {
     method: "POST",
@@ -405,7 +436,7 @@ function mergeUniquePlaces(batches: GooglePlacesPlace[][]): GooglePlacesPlace[] 
 /**
  * Multi-strategy discovery: per-type nearby + optional distance-ranked text search.
  * Google searchNearby returns prominence-biased results; combining strategies
- * surfaces more vibe-range (60–499 review) spots in tourist areas.
+ * surfaces more vibe-range (60–300 review) spots in tourist areas.
  */
 async function discoverDiversePlaces(
   lat: number,
@@ -415,6 +446,8 @@ async function discoverDiversePlaces(
     nearbyTypes: string[];
     textSearch: boolean;
     combinedNearby: boolean;
+    /** Prefer DISTANCE when hunting for hidden gems */
+    rankPreference?: "POPULARITY" | "DISTANCE";
     apiCalls: IngestApiCalls;
   },
 ): Promise<GooglePlacesPlace[]> {
@@ -423,7 +456,13 @@ async function discoverDiversePlaces(
   if (options.combinedNearby) {
     options.apiCalls.nearbySearch += 1;
     nearbyBatches = [
-      await fetchNearbyPlacesCombined(lat, lng, radiusMeters, options.nearbyTypes),
+      await fetchNearbyPlacesCombined(
+        lat,
+        lng,
+        radiusMeters,
+        options.nearbyTypes,
+        options.rankPreference,
+      ),
     ];
   } else {
     nearbyBatches = await Promise.all(
@@ -443,6 +482,131 @@ async function discoverDiversePlaces(
   }
 
   return mergeUniquePlaces([...nearbyBatches, ...textBatches]);
+}
+
+// ── Affiliate booking resolution ──────────────────────────────────────────────
+
+const HOTPEPPER_BASE = "https://webservice.recruit.co.jp/hotpepper/gourmet/v1/";
+
+/** Strip country code (+81) and non-digits to produce a 10-11 digit local number. */
+function normalizePhoneNumber(raw: string): string {
+  return raw
+    .replace(/^\+81/, "0")   // +81 → leading 0
+    .replace(/[^\d]/g, "");  // remove dashes, spaces, parens
+}
+
+/** Wrap a Hotpepper shop URL with the ValueCommerce affiliate link. */
+function wrapWithValueCommerce(hotpepperUrl: string): string {
+  const sid = process.env.VALUE_COMMERCE_SID ?? "";
+  const pid = process.env.VALUE_COMMERCE_PID ?? "";
+  if (!sid || !pid) return hotpepperUrl; // skip wrapping when keys not configured
+  return (
+    `https://ck.jp.ap.valuecommerce.com/servlet/referral` +
+    `?sid=${encodeURIComponent(sid)}` +
+    `&pid=${encodeURIComponent(pid)}` +
+    `&vc_url=${encodeURIComponent(hotpepperUrl)}`
+  );
+}
+
+interface HotpepperShop {
+  id: string;
+  name: string;
+  urls: { pc: string };
+}
+
+interface HotpepperResponse {
+  results: {
+    shop?: HotpepperShop[];
+  };
+}
+
+/**
+ * Query the Hotpepper Gourmet API for a matching restaurant.
+ * Strategy:
+ *   1. If phone_number is available → exact tel lookup (highest confidence)
+ *   2. Fallback: lat/lng range=1 (300 m) + name keyword → pick first result
+ * Returns the raw Hotpepper shop URL, or null if no match.
+ */
+async function matchHotpepperShop(
+  name: string,
+  lat: number,
+  lng: number,
+  phoneNumber: string | null,
+): Promise<string | null> {
+  const apiKey = process.env.HOTPEPPER_API_KEY;
+  if (!apiKey) return null;
+
+  const tryFetch = async (params: Record<string, string>): Promise<HotpepperShop[]> => {
+    const qs = new URLSearchParams({ key: apiKey, format: "json", count: "5", ...params });
+    try {
+      const res = await fetch(`${HOTPEPPER_BASE}?${qs.toString()}`, {
+        next: { revalidate: 86400 }, // cache 24 h — Hotpepper data rarely changes daily
+      });
+      if (!res.ok) return [];
+      const json = (await res.json()) as HotpepperResponse;
+      return json.results.shop ?? [];
+    } catch {
+      return [];
+    }
+  };
+
+  // Strategy 1: phone number exact match
+  if (phoneNumber) {
+    const tel = normalizePhoneNumber(phoneNumber);
+    const shops = await tryFetch({ tel });
+    if (shops.length > 0) return shops[0].urls.pc;
+  }
+
+  // Strategy 2: lat/lng proximity + name keyword
+  const shops = await tryFetch({
+    lat: String(lat),
+    lng: String(lng),
+    range: "1", // 300 m
+    keyword: name,
+  });
+
+  // Fuzzy match: accept if shop name contains or is contained by spot name
+  const normalise = (s: string) => s.replace(/\s|　/g, "").toLowerCase();
+  const normName = normalise(name);
+  const match = shops.find((s) => {
+    const n = normalise(s.name);
+    return n.includes(normName) || normName.includes(n);
+  });
+
+  return match ? match.urls.pc : null;
+}
+
+/**
+ * Resolve the final booking_url using the 3-tier fallback chain.
+ * Returns { hotpepperUrl, bookingUrl } — both may be null.
+ * Tier 1: Hotpepper → ValueCommerce affiliate
+ * Tier 2: Google reservationUri (no commission, preserves UX)
+ * null: caller should surface the free Google Maps deep link instead
+ */
+async function resolveBookingUrl(
+  row: SpotRow,
+): Promise<{ hotpepperUrl: string | null; bookingUrl: string | null }> {
+  // Tier 1
+  const hotpepperRaw = await matchHotpepperShop(
+    row.name,
+    row.lat,
+    row.lng,
+    row.phone_number,
+  );
+  if (hotpepperRaw) {
+    return {
+      hotpepperUrl: hotpepperRaw,
+      bookingUrl: wrapWithValueCommerce(hotpepperRaw),
+    };
+  }
+
+  // Tier 2
+  if (row.reservation_uri) {
+    return { hotpepperUrl: null, bookingUrl: row.reservation_uri };
+  }
+
+  // Tier 3 — caller uses buildGoogleMapsPlaceUrl
+  return { hotpepperUrl: null, bookingUrl: null };
 }
 
 // ── Enrichment ────────────────────────────────────────────────────────────────
@@ -470,6 +634,14 @@ export async function enrichSpotFromDetails(
   const enriched = mapPlaceToRow(details, cachedRow ?? undefined);
   if (!isDiningPlace(details) && !isDiningSpotRow(enriched)) {
     return null;
+  }
+
+  // Resolve affiliate booking URL (Hotpepper → ValueCommerce, Google Reserve, or null).
+  // Only run when booking fields are not already filled to avoid redundant API calls.
+  if (enriched.booking_url === null) {
+    const { hotpepperUrl, bookingUrl } = await resolveBookingUrl(enriched);
+    enriched.hotpepper_url = hotpepperUrl;
+    enriched.booking_url = bookingUrl;
   }
 
   const { error } = await supabaseAdmin
@@ -592,14 +764,16 @@ async function hadRecentIngestInBox(box: BoundingBox): Promise<boolean> {
   return (data?.length ?? 0) > 0;
 }
 
-/** Count fresh vibe-range spots in the bounding box. */
+/** Count vibe-range spots in the bounding box. */
 export async function countVibeSpotsInBox(
   box: BoundingBox,
   vibeMin: number,
   vibeMax: number,
   excludedIds: string[],
+  opts: { freshOnly?: boolean } = {},
 ): Promise<number> {
-  const { data } = await supabaseAdmin
+  const freshOnly = opts.freshOnly ?? true;
+  let query = supabaseAdmin
     .from("spots")
     .select("id")
     .gte("lat", box.minLat)
@@ -607,10 +781,34 @@ export async function countVibeSpotsInBox(
     .gte("lng", box.minLng)
     .lte("lng", box.maxLng)
     .gte("user_rating_count", vibeMin)
-    .lte("user_rating_count", vibeMax)
-    .gt("updated_at", staleThresholdIso());
+    .lte("user_rating_count", vibeMax);
 
+  if (freshOnly) {
+    query = query.gt("updated_at", staleThresholdIso());
+  }
+
+  const { data } = await query;
   return (data ?? []).filter((row) => !excludedIds.includes(row.id)).length;
+}
+
+/** DB-backed cooldown for gem-targeted refreshes (24h). */
+async function hadRecentVibeRefreshInBox(
+  box: BoundingBox,
+  vibeMax: number,
+): Promise<boolean> {
+  const since = new Date(Date.now() - VIBE_REFRESH_COOLDOWN_MS).toISOString();
+  const { data } = await supabaseAdmin
+    .from("spots")
+    .select("id")
+    .gte("lat", box.minLat)
+    .lte("lat", box.maxLat)
+    .gte("lng", box.minLng)
+    .lte("lng", box.maxLng)
+    .lte("user_rating_count", vibeMax)
+    .gt("updated_at", since)
+    .limit(1);
+
+  return (data?.length ?? 0) > 0;
 }
 
 function meetsCacheReviewFloor(place: GooglePlacesPlace): boolean {
@@ -618,11 +816,25 @@ function meetsCacheReviewFloor(place: GooglePlacesPlace): boolean {
   return count !== undefined && count !== null && count >= MIN_CACHE_REVIEW_COUNT;
 }
 
+function meetsReviewCeiling(
+  place: GooglePlacesPlace,
+  maxReviews: number | undefined,
+): boolean {
+  if (maxReviews === undefined) return true;
+  const count = place.userRatingCount;
+  if (count === undefined || count === null) return false;
+  return count <= maxReviews;
+}
+
 async function upsertPlacesFromGoogle(
   places: GooglePlacesPlace[],
+  opts: { maxReviews?: number } = {},
 ): Promise<number> {
   const diningPlaces = places.filter(
-    (place) => isDiningPlace(place) && meetsCacheReviewFloor(place),
+    (place) =>
+      isDiningPlace(place) &&
+      meetsCacheReviewFloor(place) &&
+      meetsReviewCeiling(place, opts.maxReviews),
   );
   if (diningPlaces.length === 0) return 0;
 
@@ -661,68 +873,71 @@ export interface IngestOptions {
 
 /**
  * Ensure the Supabase cache is populated for the given radius.
- * Production: 1× combined nearby, no text search, lazy client hydrate for photos.
- * Admin: 5× nearby + text search when vibe spots are scarce.
+ *
+ * Production:
+ * - Cold area (<20 spots): 1× Nearby (7-day cooldown)
+ * - Vibe-scarce area: 1× DISTANCE Nearby, save only ≤vibeMax reviews (24h cooldown)
+ * Admin: per-type nearby + text search when vibe spots are scarce.
  */
 export async function ensureSpotsCached(opts: IngestOptions): Promise<IngestResult> {
   const {
     lat,
     lng,
     radiusMeters,
+    excludedIds = [],
     forceFetch = false,
     ingestProfile = "production",
     bypassCooldown = false,
     vibeMinReviews = 60,
-    vibeMaxReviews = 499,
+    vibeMaxReviews = 300,
     minVibeSpots = MIN_VIBE_CACHED_SPOTS,
   } = opts;
   const apiCalls: IngestApiCalls = { ...EMPTY_INGEST_API_CALLS };
   const box = boundingBox(lat, lng, radiusMeters);
 
-  // Ingest thresholds use global cache — not per-user excludeIds
   const available = await countAvailableSpots(box, []);
+  // Count all vibe rows (not only "fresh") so we don't re-hit Google every day
+  // when gems already exist but are older than CACHE_TTL.
   const vibeAvailable = await countVibeSpotsInBox(
     box,
     vibeMinReviews,
     vibeMaxReviews,
-    [],
+    excludedIds,
+    { freshOnly: false },
   );
 
   const needsPrimary = available < MIN_CACHED_SPOTS;
-  const needsVibeDiversity =
-    ingestProfile === "admin" && vibeAvailable < minVibeSpots;
+  // Production AND admin: refresh when hidden-gem inventory is thin
+  const needsVibeDiversity = vibeAvailable < minVibeSpots;
 
   if (!forceFetch && !needsPrimary && !needsVibeDiversity) {
     return { ingested: 0, apiCalls, skippedReason: "sufficient_cache" };
   }
 
   const areaKey = ingestAreaKey(lat, lng, radiusMeters);
+  const vibeAreaKey = `${areaKey}:vibe`;
+  const vibeOnlyRefresh = needsVibeDiversity && !needsPrimary;
 
-  // Production: in-memory + DB cooldown — serverless-safe guard against ingest loops
-  if (ingestProfile === "production" && !forceFetch) {
-    if (isIngestOnCooldown(areaKey)) {
-      return { ingested: 0, apiCalls, skippedReason: "cooldown" };
-    }
-    if (await hadRecentIngestInBox(box)) {
-      markIngestCompleted(areaKey);
-      return { ingested: 0, apiCalls, skippedReason: "cooldown" };
+  if (!forceFetch && !bypassCooldown) {
+    if (vibeOnlyRefresh) {
+      // Short cooldown — unlock new gems without waiting a full week
+      if (
+        isIngestOnCooldown(vibeAreaKey) ||
+        (await hadRecentVibeRefreshInBox(box, vibeMaxReviews))
+      ) {
+        markIngestCompleted(vibeAreaKey);
+        return { ingested: 0, apiCalls, skippedReason: "cooldown" };
+      }
+    } else if (ingestProfile === "production" || needsPrimary) {
+      if (isIngestOnCooldown(areaKey) || (await hadRecentIngestInBox(box))) {
+        markIngestCompleted(areaKey);
+        return { ingested: 0, apiCalls, skippedReason: "cooldown" };
+      }
     }
   }
 
-  const vibeOnlyRefresh = needsVibeDiversity && !needsPrimary;
   const useTextSearch =
     ingestProfile === "admin" && (needsVibeDiversity || forceFetch);
-
-  // Cooldown blocks expensive admin supplemental fetches, not production nearby-only
-  if (
-    !bypassCooldown &&
-    !forceFetch &&
-    vibeOnlyRefresh &&
-    useTextSearch &&
-    isIngestOnCooldown(areaKey)
-  ) {
-    return { ingested: 0, apiCalls, skippedReason: "cooldown" };
-  }
 
   const nearbyTypes =
     ingestProfile === "admin" ? ADMIN_NEARBY_TYPES : PRODUCTION_NEARBY_TYPES;
@@ -731,6 +946,8 @@ export async function ensureSpotsCached(opts: IngestOptions): Promise<IngestResu
     nearbyTypes,
     textSearch: useTextSearch,
     combinedNearby: ingestProfile === "production",
+    // Hunt nearer / less famous spots when topping up gems
+    rankPreference: vibeOnlyRefresh || needsVibeDiversity ? "DISTANCE" : undefined,
     apiCalls,
   });
 
@@ -738,8 +955,12 @@ export async function ensureSpotsCached(opts: IngestOptions): Promise<IngestResu
     return { ingested: 0, apiCalls };
   }
 
-  const ingested = await upsertPlacesFromGoogle(places);
-  markIngestCompleted(areaKey);
+  // Vibe refresh: do not write mega-famous places into the cache
+  const ingested = await upsertPlacesFromGoogle(
+    places,
+    vibeOnlyRefresh ? { maxReviews: vibeMaxReviews } : undefined,
+  );
+  markIngestCompleted(vibeOnlyRefresh ? vibeAreaKey : areaKey);
 
   return { ingested, apiCalls };
 }

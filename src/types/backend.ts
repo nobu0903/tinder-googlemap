@@ -40,6 +40,19 @@ export interface SpotRow {
   vibe_tags: string[];
   created_at: string;
   updated_at: string;
+  /** National phone number from Google Places, e.g. "03-1234-5678" */
+  phone_number: string | null;
+  /** Google reservationUri — TableCheck / Ebica / Google Reserve URL */
+  reservation_uri: string | null;
+  /** Raw Hotpepper Gourmet shop URL (null = no match found) */
+  hotpepper_url: string | null;
+  /**
+   * Final resolved booking URL.
+   * Tier 1: ValueCommerce-wrapped Hotpepper URL
+   * Tier 2: Google reservationUri (no affiliate)
+   * null: only Google Maps fallback available (use buildGoogleMapsPlaceUrl)
+   */
+  booking_url: string | null;
 }
 
 export type SwipeAction = "like" | "dislike";
@@ -57,7 +70,7 @@ export interface SwipeRow {
  * Kept at 3 to cap Google Place Photo API billing — each photo URL
  * displayed in the browser is a separate billed request ($0.007/photo).
  */
-export const MAX_STORED_PHOTOS = 6;
+export const MAX_STORED_PHOTOS = 3;
 
 /** Skip Place Details when at least this many photos exist from search cache */
 export const MIN_PHOTOS_SKIP_DETAILS = 3;
@@ -130,6 +143,35 @@ export interface FeedSpot {
   address: string | null;
   /** Google weekday descriptions, e.g. "Monday: 11:00 AM – 10:00 PM" */
   weekdayDescriptions: string[];
+  /**
+   * Final resolved booking URL surfaced to the UI.
+   * Tier 1: ValueCommerce-wrapped Hotpepper link (affiliate revenue)
+   * Tier 2: Google reservationUri (TableCheck / Ebica / Google Reserve)
+   * null: only Google Maps fallback available — "Book" button is hidden
+   */
+  bookingUrl: string | null;
+}
+
+// ── Collection (liked spots) ──────────────────────────────────────────────────
+
+/** A spot the authenticated user has liked, returned by GET /api/collection */
+export interface LikedSpot {
+  spotId: string;
+  name: string;
+  rating: number | null;
+  priceLevel: number | null;
+  primaryType: string | null;
+  address: string | null;
+  lat: number;
+  lng: number;
+  photos: SpotPhoto[];
+  bookingUrl: string | null;
+  likedAt: string;
+}
+
+export interface CollectionResponse {
+  spots: LikedSpot[];
+  total: number;
 }
 
 // ── API request / response shapes ────────────────────────────────────────────
@@ -146,6 +188,12 @@ export interface SwipeFeedResponse {
   spots: SwipeFeedItem[];
   /** Search radius actually used (km) — may be 2, 5, or 10 after auto-expansion */
   radiusKm: number;
+  /**
+   * Number of vibe-pool spots that passed all filters for the requested tag.
+   * Only present when a `tag` was requested. Used by the client to show a
+   * "limited themed spots" banner when this is low.
+   */
+  vibeSpotCount?: number;
 }
 
 export interface SwipeActionPayload {
@@ -204,4 +252,18 @@ export interface GooglePlacesPlace {
   photos?: GooglePlacesPhoto[];
   currentOpeningHours?: GooglePlacesOpeningHours;
   location?: { latitude: number; longitude: number };
+  /** National-format phone number, e.g. "03-1234-5678" (Advanced field) */
+  nationalPhoneNumber?: string;
+  /** Direct reservation URL from Google (TableCheck, Ebica, Google Reserve, etc.) */
+  reservationUri?: string;
+}
+
+/** Booking tier for analytics tracking */
+export type BookingTier = 1 | 2 | 3;
+
+export interface BookingClickPayload {
+  spotId: string;
+  bookingUrl: string;
+  /** 1=Hotpepper affiliate, 2=Google Reserve, 3=Google Maps */
+  tier: BookingTier;
 }

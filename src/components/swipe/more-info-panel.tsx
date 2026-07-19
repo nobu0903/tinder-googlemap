@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect } from "react";
-import { MapPin, Clock, ChevronRight } from "lucide-react";
+import { useCallback, useEffect } from "react";
+import { MapPin, Clock, ChevronRight, CalendarCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { buildGoogleMapsPlaceUrl } from "@/types/backend";
-import type { FeedSpot } from "@/types/backend";
+import type { BookingClickPayload, FeedSpot } from "@/types/backend";
 
 function GoogleMapsIcon() {
   return (
@@ -41,9 +41,10 @@ interface MoreInfoPanelProps {
   isOpen: boolean;
   onClose: () => void;
   spot: FeedSpot;
+  accessToken?: string | null;
 }
 
-export function MoreInfoPanel({ isOpen, onClose, spot }: MoreInfoPanelProps) {
+export function MoreInfoPanel({ isOpen, onClose, spot, accessToken }: MoreInfoPanelProps) {
   const mapsUrl = buildGoogleMapsPlaceUrl(spot.spotId, spot.name);
 
   useEffect(() => {
@@ -52,6 +53,33 @@ export function MoreInfoPanel({ isOpen, onClose, spot }: MoreInfoPanelProps) {
       document.body.style.overflow = "";
     };
   }, [isOpen]);
+
+  const handleBookingClick = useCallback(() => {
+    if (!spot.bookingUrl) return;
+
+    // Determine tier from URL pattern for analytics
+    const tier: BookingClickPayload["tier"] = spot.bookingUrl.includes("valuecommerce")
+      ? 1
+      : spot.bookingUrl.includes("google.com/maps")
+        ? 3
+        : 2;
+
+    // Fire-and-forget analytics (non-blocking)
+    const payload: BookingClickPayload = {
+      spotId: spot.spotId,
+      bookingUrl: spot.bookingUrl,
+      tier,
+    };
+    const headers: HeadersInit = { "Content-Type": "application/json" };
+    if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+    fetch("/api/analytics/booking-click", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+
+    window.open(spot.bookingUrl, "_blank", "noopener,noreferrer");
+  }, [spot.bookingUrl, spot.spotId, accessToken]);
 
   return (
     <>
@@ -100,6 +128,30 @@ export function MoreInfoPanel({ isOpen, onClose, spot }: MoreInfoPanelProps) {
             </p>
           </div>
 
+          {/* Book a Table — only shown when Tier 1 (Hotpepper) or Tier 2 (Google Reserve) is available */}
+          {spot.bookingUrl && (
+            <button
+              type="button"
+              onClick={handleBookingClick}
+              className="mb-3 flex w-full items-center gap-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-3.5 shadow-[0_6px_24px_rgba(16,185,129,0.35)] transition-transform active:scale-[0.98] hover:shadow-[0_8px_28px_rgba(16,185,129,0.5)]"
+            >
+              <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-white/20">
+                <CalendarCheck className="size-5 text-white" />
+              </div>
+              <div className="min-w-0 flex-1 text-left">
+                <p className="text-[15px] font-bold leading-tight text-white">
+                  予約する / Book a Table
+                </p>
+                <p className="text-xs font-medium text-white/75">
+                  {spot.bookingUrl.includes("valuecommerce")
+                    ? "Hotpepper Gourmet"
+                    : "Online Reservation"}
+                </p>
+              </div>
+              <ChevronRight className="size-5 shrink-0 text-white" />
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => window.open(mapsUrl, "_blank")}
@@ -142,16 +194,12 @@ export function MoreInfoPanel({ isOpen, onClose, spot }: MoreInfoPanelProps) {
             </h3>
 
             {spot.address && (
-              <button
-                type="button"
-                className="flex w-full items-center gap-3 rounded-xl border border-white/6 bg-surface-raised px-4 py-3 transition-colors hover:bg-white/5 active:bg-white/8"
-              >
-                <MapPin className="size-4 shrink-0 text-stealth" />
-                <span className="flex-1 text-left text-[13px] text-text-muted">
+              <div className="flex w-full items-start gap-3 rounded-xl border border-white/6 bg-surface-raised px-4 py-3">
+                <MapPin className="mt-0.5 size-4 shrink-0 text-stealth" />
+                <span className="flex-1 text-left text-[13px] leading-relaxed text-text-muted">
                   {spot.address}
                 </span>
-                <ChevronRight className="size-4 shrink-0 text-stealth" />
-              </button>
+              </div>
             )}
 
             <div className="mt-1.5 rounded-xl border border-white/6 bg-surface-raised px-4 py-3">

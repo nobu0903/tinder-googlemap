@@ -5,6 +5,7 @@ import Image from "next/image";
 import { EXPLORE_THEMES, type ExploreTheme } from "@/lib/explore-mock";
 import { ACTIVE_THEME_IDS, buildThemedSwipePath } from "@/lib/explore/themes";
 import { useAuth } from "@/lib/hooks/use-auth";
+import type { Coordinates } from "@/lib/hooks/use-location";
 
 const ACTIVE_THEMES = EXPLORE_THEMES.filter((t) =>
   ACTIVE_THEME_IDS.includes(t.id as (typeof ACTIVE_THEME_IDS)[number]),
@@ -50,12 +51,17 @@ function ThemeTile({
   );
 }
 
-export function ThemeGrid() {
+interface ThemeGridProps {
+  coords?: Coordinates | null;
+  locationLabel?: string | null;
+}
+
+export function ThemeGrid({ coords, locationLabel }: ThemeGridProps) {
   const router = useRouter();
   const { session, isLoading } = useAuth();
 
   const handleSelect = (theme: ExploreTheme) => {
-    const destination = buildThemedSwipePath(theme.id);
+    const destination = buildThemedSwipePath(theme.id, coords, locationLabel);
 
     if (isLoading) return;
 

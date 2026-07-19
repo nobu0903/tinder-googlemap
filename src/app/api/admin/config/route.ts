@@ -14,7 +14,9 @@ export async function GET(req: NextRequest) {
 
 const ConfigSchema = z.object({
   classicMinReviews: z.number().int().min(0).optional(),
+  classicMaxReviews: z.number().int().min(0).optional(),
   vibeMinReviews: z.number().int().min(0).optional(),
+  vibeMaxReviews: z.number().int().min(0).optional(),
   classicMegaReviewThreshold: z.number().int().min(0).optional(),
   classicSlotsPerCycle: z.number().int().min(0).optional(),
   vibeSlotsPerCycle: z.number().int().min(1).optional(),

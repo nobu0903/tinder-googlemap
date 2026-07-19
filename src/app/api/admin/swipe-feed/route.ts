@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { adminUnauthorized, verifyAdminRequest } from "@/lib/admin/auth";
-import { getFeedConfig } from "@/lib/feed/config";
+import { getFeedConfig, withoutAreaBandOverrides } from "@/lib/feed/config";
 import { runFeedEngine } from "@/lib/feed/engine";
 
 const ConfigOverrideSchema = z.object({
   classicMinReviews: z.number().int().min(0).optional(),
+  classicMaxReviews: z.number().int().min(0).optional(),
   vibeMinReviews: z.number().int().min(0).optional(),
   vibeMaxReviews: z.number().int().min(0).optional(),
   classicMegaReviewThreshold: z.number().int().min(0).optional(),
@@ -46,7 +47,10 @@ export async function POST(req: NextRequest) {
   try {
     const { lat, lng, tag, config, excludeIds } = parsed.data;
     const baseConfig = getFeedConfig();
-    const mergedConfig = config ? { ...baseConfig, ...config } : baseConfig;
+    // Review bands come from auto area status — ignore form overrides.
+    const mergedConfig = config
+      ? { ...baseConfig, ...withoutAreaBandOverrides(config) }
+      : baseConfig;
 
     const result = await runFeedEngine({
       lat,

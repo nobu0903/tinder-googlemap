@@ -39,7 +39,13 @@ export function classifyPool(
 ): FeedPoolKind {
   const count = row.user_rating_count;
   if (!passesReviewNoiseFloor(row, config.vibeMinReviews)) return "none";
-  if (count! >= config.classicMinReviews) return "classic";
+  if (count! > config.classicMaxReviews) return "none";
+  if (
+    count! >= config.classicMinReviews &&
+    count! <= config.classicMaxReviews
+  ) {
+    return "classic";
+  }
   if (count! <= config.vibeMaxReviews) return "vibe";
   return "none";
 }

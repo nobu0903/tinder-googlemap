@@ -11,6 +11,7 @@ interface UseAuthReturn {
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string) => Promise<{ error: string | null }>;
+  resendConfirmation: (email: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
 
@@ -45,7 +46,30 @@ export function useAuth(): UseAuthReturn {
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signUp({ email, password });
+    const emailRedirectTo =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/auth/confirm`
+        : undefined;
+
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo },
+    });
+    return { error: error?.message ?? null };
+  }, []);
+
+  const resendConfirmation = useCallback(async (email: string) => {
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email,
+      options: {
+        emailRedirectTo:
+          typeof window !== "undefined"
+            ? `${window.location.origin}/auth/confirm`
+            : undefined,
+      },
+    });
     return { error: error?.message ?? null };
   }, []);
 
@@ -60,6 +84,7 @@ export function useAuth(): UseAuthReturn {
     isLoading,
     signIn,
     signUp,
+    resendConfirmation,
     signOut,
   };
 }

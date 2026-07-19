@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { adminFetch } from "@/lib/admin/client";
-import type { FeedAlgorithmConfig } from "@/lib/feed/config";
+import type { AreaProfile, FeedAlgorithmConfig } from "@/lib/feed/config";
 import type { FeedEngineResult, FeedSpotDebug } from "@/lib/feed/engine";
 import type { IngestApiCalls } from "@/lib/places/ingest";
 import type { FeedSpot, SwipeAction } from "@/types/backend";
@@ -36,6 +36,13 @@ export function useAdminSwipeFeed({
   const [sessionApiCalls, setSessionApiCalls] = useState<IngestApiCalls>({
     ...EMPTY_API_CALLS,
   });
+  const [areaProfile, setAreaProfile] = useState<AreaProfile | null>(null);
+  const [effectiveBands, setEffectiveBands] = useState<{
+    classicMin: number;
+    classicMax: number;
+    vibeMin: number;
+    vibeMax: number;
+  } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isRefetching, setIsRefetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -118,6 +125,13 @@ export function useAdminSwipeFeed({
         textSearch: prev.textSearch + data.meta.apiCalls.textSearch,
         placeDetails: prev.placeDetails + data.meta.apiCalls.placeDetails,
       }));
+      setAreaProfile(data.meta.areaProfile);
+      setEffectiveBands({
+        classicMin: data.meta.config.classicMinReviews,
+        classicMax: data.meta.config.classicMaxReviews,
+        vibeMin: data.meta.config.vibeMinReviews,
+        vibeMax: data.meta.config.vibeMaxReviews,
+      });
 
       setDebugById((prev) => {
         const next = new Map(prev);
@@ -156,6 +170,8 @@ export function useAdminSwipeFeed({
       setQueue([]);
       setDebugById(new Map());
       setSessionApiCalls({ ...EMPTY_API_CALLS });
+      setAreaProfile(null);
+      setEffectiveBands(null);
       setError(null);
     }
   }, [active, lat, lng, config]);
@@ -193,6 +209,8 @@ export function useAdminSwipeFeed({
     currentDebug,
     queueLength: queue.length,
     sessionApiCalls,
+    areaProfile,
+    effectiveBands,
     isLoading,
     isRefetching,
     error,

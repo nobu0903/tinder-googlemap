@@ -1,3 +1,5 @@
+import type { Coordinates } from "@/lib/hooks/use-location";
+
 /** Maps Explore theme IDs to feed `tag` query params (vibe_tags filter). */
 export const THEME_TAG_MAP: Record<string, string> = {
   "under-1000": "budget-eat",
@@ -26,9 +28,18 @@ export function getThemeTag(themeId: string): string | undefined {
   return THEME_TAG_MAP[themeId];
 }
 
-export function buildThemedSwipePath(themeId: string): string {
+export function buildThemedSwipePath(
+  themeId: string,
+  coords?: Coordinates | null,
+  label?: string | null,
+): string {
   const tag = getThemeTag(themeId);
   const params = new URLSearchParams({ theme: themeId });
   if (tag) params.set("tag", tag);
+  if (coords) {
+    params.set("lat", String(coords.lat));
+    params.set("lng", String(coords.lng));
+  }
+  if (label) params.set("label", label);
   return `/?${params.toString()}`;
 }

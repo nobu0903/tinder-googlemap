@@ -31,6 +31,8 @@ interface UseSwipeFeedReturn {
   isInitialLoading: boolean;
   isRefetching: boolean;
   error: string | null;
+  /** True when a tag was requested but fewer than 6 vibe spots matched — classic fills in. */
+  isSparseTheme: boolean;
   advance: () => void;
   recordSwipe: (action: SwipeAction) => void;
 }
@@ -45,6 +47,8 @@ export function useSwipeFeed({
   const [isInitialLoading, setIsInitialLoading] = useState(false);
   const [isRefetching, setIsRefetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isSparseTheme, setIsSparseTheme] = useState(false);
+
   const fetchingRef = useRef(false);
   const queueRef = useRef<SwipeFeedItem[]>([]);
   const seenSpotIdsRef = useRef<Set<string>>(new Set());
@@ -53,18 +57,50 @@ export function useSwipeFeed({
   const lastFetchAtRef = useRef(0);
   const coordsRef = useRef<Coordinates | null>(coords);
 
-  useEffect(() => {
-    queueRef.current = queue;
-  }, [queue]);
+  // ── Volatile-value refs (avoid stale closures without re-creating callbacks) ──
+  const accessTokenRef = useRef(accessToken);
+  const tagRef = useRef(tag);
+  const enabledRef = useRef(enabled);
 
+  useEffect(() => { queueRef.current = queue; }, [queue]);
+  useEffect(() => { accessTokenRef.current = accessToken; }, [accessToken]);
+  useEffect(() => { tagRef.current = tag; }, [tag]);
+  useEffect(() => { enabledRef.current = enabled; }, [enabled]);
+
+  // Location change: drop old-area cards and allow an immediate refetch.
+  // Does NOT clear seenSpotIds or the free-tier swipe counter (absolute quota).
+  const coordsKey =
+    coords != null ? `${coords.lat.toFixed(5)},${coords.lng.toFixed(5)}` : null;
+  const prevCoordsKeyRef = useRef<string | null>(null);
   useEffect(() => {
     coordsRef.current = coords;
-  }, [coords]);
+    if (coordsKey === prevCoordsKeyRef.current) return;
+    const hadPrevious = prevCoordsKeyRef.current !== null;
+    prevCoordsKeyRef.current = coordsKey;
+    if (!hadPrevious || coordsKey === null) return;
+
+    setQueue([]);
+    queueRef.current = [];
+    lastFetchAtRef.current = 0;
+    setError(null);
+    setIsSparseTheme(false);
+  }, [coords, coordsKey]);
+
+  // ── Page Visibility: pause all fetching when the tab is in the background ──
+  const tabHiddenRef = useRef(false);
+  useEffect(() => {
+    const handleVisibility = () => {
+      tabHiddenRef.current = document.visibilityState === "hidden";
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, []);
 
   const lazyHydrateQueue = useCallback(async () => {
     const currentCoords = coordsRef.current;
     if (!currentCoords || queueRef.current.length === 0) return;
     if (sessionHydratesRef.current >= MAX_SESSION_HYDRATES) return;
+    if (tabHiddenRef.current) return;
 
     const remaining = MAX_SESSION_HYDRATES - sessionHydratesRef.current;
     const candidates = queueRef.current
@@ -110,8 +146,18 @@ export function useSwipeFeed({
     }
   }, []);
 
+  /**
+   * fetchFeed is intentionally stable (empty volatile deps).
+   * accessToken, tag, enabled are accessed via refs to avoid this callback
+   * being recreated on every Supabase JWT refresh (every ~1 hour), which
+   * would otherwise cause the trigger effect below to fire and make an
+   * unwanted API call when the queue happened to be empty.
+   */
   const fetchFeed = useCallback(async () => {
-    if (!enabled || fetchingRef.current) return;
+    // Pause when tab is hidden (e.g. user minimised browser or closed lid)
+    if (tabHiddenRef.current) return;
+    if (!enabledRef.current || fetchingRef.current) return;
+
     const currentCoords = coordsRef.current;
     if (!currentCoords) return;
 
@@ -133,7 +179,7 @@ export function useSwipeFeed({
       const url = new URL("/api/swipe", window.location.origin);
       url.searchParams.set("lat", String(currentCoords.lat));
       url.searchParams.set("lng", String(currentCoords.lng));
-      if (tag) url.searchParams.set("tag", tag);
+      if (tagRef.current) url.searchParams.set("tag", tagRef.current);
 
       const exclude = [...seenSpotIdsRef.current];
       if (exclude.length > 0) {
@@ -141,7 +187,9 @@ export function useSwipeFeed({
       }
 
       const headers: HeadersInit = {};
-      if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+      if (accessTokenRef.current) {
+        headers["Authorization"] = `Bearer ${accessTokenRef.current}`;
+      }
 
       const res = await fetch(url.toString(), { headers });
       if (!res.ok) {
@@ -153,6 +201,12 @@ export function useSwipeFeed({
 
       const data = await res.json();
       const newItems: SwipeFeedItem[] = data.spots ?? [];
+
+      // Track sparse themed feeds so the UI can show a warning banner
+      const vibeCount = typeof data.vibeSpotCount === "number" ? data.vibeSpotCount : null;
+      if (vibeCount !== null && tagRef.current) {
+        setIsSparseTheme(vibeCount < 6);
+      }
 
       setQueue((prev) => {
         const inQueue = new Set(prev.map(feedItemKey));
@@ -172,7 +226,16 @@ export function useSwipeFeed({
       setIsRefetching(false);
       fetchingRef.current = false;
     }
-  }, [tag, accessToken, enabled, lazyHydrateQueue]);
+  }, [lazyHydrateQueue]);
+
+  /**
+   * Keep a stable ref to the latest fetchFeed so the trigger effect below
+   * does NOT need fetchFeed in its dependency array.  Without this, any change
+   * to fetchFeed (e.g. due to a Supabase JWT refresh changing accessToken) would
+   * re-run the effect and potentially fire an unwanted API call.
+   */
+  const fetchFeedRef = useRef(fetchFeed);
+  useEffect(() => { fetchFeedRef.current = fetchFeed; });
 
   const currentItemKey = queue[0] ? feedItemKey(queue[0]) : null;
 
@@ -180,15 +243,18 @@ export function useSwipeFeed({
     if (enabled && coords && queue.length > 0) void lazyHydrateQueue();
   }, [currentItemKey, queue.length, lazyHydrateQueue, enabled, coords]);
 
+  // Trigger effect: only re-runs when queue length, enabled flag, or coords change.
+  // fetchFeed is intentionally NOT a dependency — we access it via fetchFeedRef.
   useEffect(() => {
     if (!enabled || !coords) return;
     const shouldFetch = REFETCH_WHEN_EMPTY
       ? queue.length === 0
       : queue.length <= 3;
     if (shouldFetch && !fetchingRef.current) {
-      fetchFeed();
+      void fetchFeedRef.current();
     }
-  }, [queue.length, enabled, coords, fetchFeed]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue.length, enabled, coords]);
 
   const advance = useCallback(() => {
     setQueue((prev) => {
@@ -212,12 +278,12 @@ export function useSwipeFeed({
 
       seenSpotIdsRef.current.add(item.spotId);
 
-      if (accessToken) {
+      if (accessTokenRef.current) {
         fetch("/api/swipe/action", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${accessTokenRef.current}`,
           },
           body: JSON.stringify({ spotId: item.spotId, action }),
         }).catch(console.error);
@@ -225,7 +291,7 @@ export function useSwipeFeed({
 
       advance();
     },
-    [queue, accessToken, advance],
+    [queue, advance],
   );
 
   return {
@@ -234,6 +300,7 @@ export function useSwipeFeed({
     isInitialLoading,
     isRefetching,
     error,
+    isSparseTheme,
     advance,
     recordSwipe,
   };

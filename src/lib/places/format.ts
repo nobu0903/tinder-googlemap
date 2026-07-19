@@ -35,6 +35,53 @@ export function haversineKm(
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+/**
+ * Calculates whether a spot is open RIGHT NOW from the stored `periods` array.
+ *
+ * This replaces the stored `openNow` snapshot (which reflects the state at ingest
+ * time and becomes stale with a 7-day cooldown). Using `periods` gives accurate
+ * real-time open/closed status without any additional API calls.
+ *
+ * Handles:
+ *  - Same-day periods (e.g. Mon 11:00–22:00)
+ *  - Midnight-spanning periods (e.g. Fri 22:00 → Sat 02:00)
+ *  - 24-hour places (open.hour === close.hour === 0 on the same day)
+ *
+ * Returns false when opening_hours data is unavailable.
+ */
+function isOpenNow(row: SpotRow): boolean {
+  const periods = row.opening_hours?.periods;
+  if (!periods || periods.length === 0) return false;
+
+  const now = new Date();
+  const currentDay = now.getDay();                              // 0 = Sun … 6 = Sat
+  const currentMins = now.getHours() * 60 + now.getMinutes();
+
+  for (const p of periods) {
+    const openMins = p.open.hour * 60 + p.open.minute;
+    const closeMins = p.close.hour * 60 + p.close.minute;
+
+    if (p.open.day === p.close.day) {
+      // 24-hour place (Google encodes as open 0:00 → close 0:00 same day)
+      if (openMins === 0 && closeMins === 0) return true;
+      // Normal same-day period
+      if (
+        currentDay === p.open.day &&
+        currentMins >= openMins &&
+        currentMins < closeMins
+      ) {
+        return true;
+      }
+    } else {
+      // Midnight-spanning (e.g. Fri 22:00 → Sat 02:00)
+      if (currentDay === p.open.day && currentMins >= openMins) return true;
+      if (currentDay === p.close.day && currentMins < closeMins) return true;
+    }
+  }
+
+  return false;
+}
+
 /** Determine today's closing time string, e.g. "22:00", from opening_hours. */
 function getTodayClose(row: SpotRow): string | null {
   const periods = row.opening_hours?.periods;
@@ -146,7 +193,7 @@ export function rowToFeedSpot(
     priceLabel: formatPriceLabel(row.price_level),
     distanceKm:
       Math.round(haversineKm(userLat, userLng, row.lat, row.lng) * 10) / 10,
-    isOpen: row.opening_hours?.openNow ?? false,
+    isOpen: isOpenNow(row),
     todayClose: getTodayClose(row),
     category: row.vibe_tags.length > 0 ? row.vibe_tags[0] : "Restaurant",
     layoutType: firstPage?.layoutType ?? "SINGLE_FULL",
@@ -154,6 +201,7 @@ export function rowToFeedSpot(
     vibeTags: row.vibe_tags,
     address: row.address,
     weekdayDescriptions: row.opening_hours?.weekdayDescriptions ?? [],
+    bookingUrl: row.booking_url ?? null,
   };
 }
 
