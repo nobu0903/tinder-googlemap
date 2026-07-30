@@ -22,6 +22,8 @@ const EXIT_MULTIPLIER = 0.45;
 const EXIT_MS = 520;
 /** Ignore photo-tap if finger moved more than this */
 const TAP_SLOP_PX = 12;
+/** Prefer horizontal vs vertical before locking swipe */
+const AXIS_LOCK_RATIO = 1.15;
 
 interface SwipeableCardProps {
   children: ReactNode;
@@ -45,22 +47,27 @@ export function SwipeableCard({
   itemKey,
 }: SwipeableCardProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const trackingRef = useRef(false);
   const draggingRef = useRef(false);
   const exitingRef = useRef(false);
   const startXRef = useRef(0);
   const startYRef = useRef(0);
   const offsetXRef = useRef(0);
   const offsetYRef = useRef(0);
-  const movedRef = useRef(false);
+  /** True only after a real horizontal drag — used to swallow the synthetic click */
+  const didSwipeGestureRef = useRef(false);
   const pointerIdRef = useRef<number | null>(null);
+  const axisLockedRef = useRef<"h" | "v" | null>(null);
 
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [isAnimating, setIsAnimating] = useState(false);
 
-  // Reset pose whenever the card identity changes
   useEffect(() => {
     exitingRef.current = false;
+    trackingRef.current = false;
     draggingRef.current = false;
+    didSwipeGestureRef.current = false;
+    axisLockedRef.current = null;
     offsetXRef.current = 0;
     offsetYRef.current = 0;
     setOffset({ x: 0, y: 0 });
@@ -71,6 +78,7 @@ export function SwipeableCard({
     (action: SwipeAction) => {
       if (exitingRef.current || disabled) return;
       exitingRef.current = true;
+      trackingRef.current = false;
       draggingRef.current = false;
 
       const width = containerRef.current?.offsetWidth ?? 360;
@@ -87,13 +95,11 @@ export function SwipeableCard({
 
       window.setTimeout(() => {
         onSwipe(action);
-        // Parent will swap itemKey → effect resets pose
       }, EXIT_MS);
     },
     [disabled, onSwipe],
   );
 
-  // Expose imperative trigger for SwipeActions buttons
   useEffect(() => {
     if (!swipeRef) return;
     swipeRef.current = commitSwipe;
@@ -112,52 +118,89 @@ export function SwipeableCard({
 
   const handlePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (disabled || exitingRef.current) return;
-    // Only primary button / touch
     if (e.pointerType === "mouse" && e.button !== 0) return;
 
-    // Don't steal gestures from buttons / links inside the card (More Info etc.)
     const target = e.target as HTMLElement | null;
     if (target?.closest("button, a, input, textarea, select, [role='button']")) {
       return;
     }
 
-    draggingRef.current = true;
-    movedRef.current = false;
+    // Do NOT capture yet — capturing here suppresses photo left/right taps.
     pointerIdRef.current = e.pointerId;
+    trackingRef.current = true;
+    draggingRef.current = false;
+    didSwipeGestureRef.current = false;
+    axisLockedRef.current = null;
     startXRef.current = e.clientX;
     startYRef.current = e.clientY;
+    offsetXRef.current = 0;
+    offsetYRef.current = 0;
     setIsAnimating(false);
-
-    e.currentTarget.setPointerCapture(e.pointerId);
   };
 
   const handlePointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (!draggingRef.current || exitingRef.current) return;
+    if (!trackingRef.current || exitingRef.current) return;
     if (pointerIdRef.current !== e.pointerId) return;
 
     const dx = e.clientX - startXRef.current;
     const dy = e.clientY - startYRef.current;
 
-    if (Math.abs(dx) > TAP_SLOP_PX || Math.abs(dy) > TAP_SLOP_PX) {
-      movedRef.current = true;
+    if (axisLockedRef.current === null) {
+      const absX = Math.abs(dx);
+      const absY = Math.abs(dy);
+      if (absX < TAP_SLOP_PX && absY < TAP_SLOP_PX) return;
+
+      // Vertical → abandon (let scroll / ignore); keep photo tap clickable
+      if (absY > absX * AXIS_LOCK_RATIO) {
+        axisLockedRef.current = "v";
+        trackingRef.current = false;
+        return;
+      }
+
+      // Horizontal → start swipe drag
+      if (absX > absY * AXIS_LOCK_RATIO) {
+        axisLockedRef.current = "h";
+        draggingRef.current = true;
+        didSwipeGestureRef.current = true;
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId);
+        } catch {
+          // ignore
+        }
+      } else {
+        return;
+      }
     }
 
+    if (axisLockedRef.current !== "h" || !draggingRef.current) return;
+
     offsetXRef.current = dx;
-    offsetYRef.current = dy * 0.35; // damp vertical drift
+    offsetYRef.current = dy * 0.35;
     setOffset({ x: offsetXRef.current, y: offsetYRef.current });
   };
 
   const handlePointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (!draggingRef.current || exitingRef.current) return;
     if (pointerIdRef.current !== e.pointerId) return;
-
-    draggingRef.current = false;
     pointerIdRef.current = null;
 
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {
-      // already released
+    const wasDragging = draggingRef.current;
+    trackingRef.current = false;
+    draggingRef.current = false;
+
+    if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        // already released
+      }
+    }
+
+    if (exitingRef.current) return;
+
+    // Pure tap (no horizontal lock) — leave click alone for photo paging
+    if (!wasDragging || axisLockedRef.current !== "h") {
+      axisLockedRef.current = null;
+      return;
     }
 
     const x = offsetXRef.current;
@@ -168,19 +211,18 @@ export function SwipeableCard({
     } else {
       snapBack();
     }
+    axisLockedRef.current = null;
   };
 
-  // Swallow click after a drag so photo page-tap doesn't fire
   const handleClickCapture = (e: React.MouseEvent) => {
-    if (movedRef.current) {
+    if (didSwipeGestureRef.current) {
       e.stopPropagation();
       e.preventDefault();
-      movedRef.current = false;
+      didSwipeGestureRef.current = false;
     }
   };
 
-  const rotation =
-    (offset.x / SWIPE_THRESHOLD) * MAX_ROTATION_DEG;
+  const rotation = (offset.x / SWIPE_THRESHOLD) * MAX_ROTATION_DEG;
   const clampedRotation = Math.max(
     -MAX_ROTATION_DEG,
     Math.min(MAX_ROTATION_DEG, rotation),
@@ -193,7 +235,7 @@ export function SwipeableCard({
     <div
       ref={containerRef}
       className={cn(
-        "relative flex min-h-0 flex-1 flex-col touch-none will-change-transform",
+        "relative flex min-h-0 flex-1 flex-col touch-pan-y will-change-transform",
         !disabled && "cursor-grab active:cursor-grabbing",
         className,
       )}
@@ -209,7 +251,6 @@ export function SwipeableCard({
       onPointerCancel={handlePointerUp}
       onClickCapture={handleClickCapture}
     >
-      {/* LIKE stamp — top-left, Tinder-style */}
       <div
         aria-hidden
         className="pointer-events-none absolute left-2 top-8 z-40 w-[68%] max-w-[260px] -rotate-12"
@@ -226,7 +267,6 @@ export function SwipeableCard({
         />
       </div>
 
-      {/* NOPE stamp — top-right, Tinder-style */}
       <div
         aria-hidden
         className="pointer-events-none absolute right-2 top-8 z-40 w-[72%] max-w-[280px] rotate-12"

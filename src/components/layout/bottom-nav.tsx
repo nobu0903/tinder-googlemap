@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { NAV_TABS, type NavTabId } from "@/lib/constants";
+import { useLang } from "@/lib/i18n/context";
 
 function resolveActiveTab(pathname: string): NavTabId {
   if (pathname.startsWith("/settings")) return "settings";
@@ -15,6 +16,7 @@ function resolveActiveTab(pathname: string): NavTabId {
 export function BottomNav() {
   const pathname = usePathname();
   const activeTab = resolveActiveTab(pathname);
+  const { t } = useLang();
 
   return (
     <nav
@@ -51,7 +53,7 @@ export function BottomNav() {
                   isActive && "drop-shadow-[0_0_8px_rgba(224,62,0,0.5)]",
                 )}
               >
-                {tab.label}
+                {t(`nav.${tab.id}`)}
               </span>
             </Link>
           );

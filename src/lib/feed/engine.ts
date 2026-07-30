@@ -31,10 +31,9 @@ import {
   type FeedPoolKind,
 } from "./exclusion";
 import { rankVibePool } from "./gem-score";
+import { matchesTheme, rankByThemeFit } from "@/lib/explore/theme-match";
 
 export type { AreaProfile };
-
-const PREMIUM_VIBE_TAGS = new Set(["splurge", "date", "dinner", "reward"]);
 
 export type FeedSlotSource = "classic" | "vibe" | "fill";
 
@@ -133,23 +132,17 @@ async function queryEligiblePools(
       .lte("lng", box.maxLng)
       .gte("user_rating_count", noiseFloor);
 
-  let vibeQuery = base()
-    .gte("user_rating_count", config.vibeMinReviews)
-    .lte("user_rating_count", config.vibeMaxReviews);
-
-  if (tag) {
-    vibeQuery = vibeQuery.contains("vibe_tags", [tag]);
-    if (PREMIUM_VIBE_TAGS.has(tag)) {
-      vibeQuery = vibeQuery.gte("price_level", 2).lte("price_level", 3);
-    }
-  }
-
+  // Fetch full vibe/classic bands first. Theme tags are applied in-memory with
+  // soft price/rating fallbacks — strict vibe_tags-only filters starve rural caches.
   const [{ data: classicRaw }, { data: vibeRaw }] = await Promise.all([
     base()
       .gte("user_rating_count", config.classicMinReviews)
       .lte("user_rating_count", config.classicMaxReviews)
       .limit(120),
-    vibeQuery.limit(120),
+    base()
+      .gte("user_rating_count", config.vibeMinReviews)
+      .lte("user_rating_count", config.vibeMaxReviews)
+      .limit(120),
   ]);
 
   const applyPoolFilters = (rows: SpotRow[]) =>
@@ -157,9 +150,23 @@ async function queryEligiblePools(
       passesReviewNoiseFloor(row, noiseFloor),
     );
 
+  let classic = applyPoolFilters((classicRaw ?? []) as SpotRow[]);
+  let vibe = applyPoolFilters((vibeRaw ?? []) as SpotRow[]);
+
+  if (tag) {
+    classic = rankByThemeFit(
+      classic.filter((row) => matchesTheme(row, tag)),
+      tag,
+    );
+    vibe = rankByThemeFit(
+      vibe.filter((row) => matchesTheme(row, tag)),
+      tag,
+    );
+  }
+
   return {
-    classic: applyPoolFilters((classicRaw ?? []) as SpotRow[]),
-    vibe: applyPoolFilters((vibeRaw ?? []) as SpotRow[]),
+    classic,
+    vibe,
     rawClassic: (classicRaw ?? []).length,
     rawVibe: (vibeRaw ?? []).length,
   };
@@ -187,14 +194,18 @@ function buildFeedPoolWithDebug(
   vibe: SpotRow[],
   excluded: Set<string>,
   config: FeedAlgorithmConfig,
+  tag?: string,
 ): { rows: SpotRow[]; assignments: Map<string, FeedSlotSource> } {
   const eligibleClassic = classic.filter((s) => !excluded.has(s.id));
   const { slotPool: classicSlotPool } = splitClassicByProminence(
     eligibleClassic,
     config.classicMegaReviewThreshold,
   );
-  // Gem-first: rank vibe by hidden-gem score (low reviews, solid rating, ≥1 photo)
-  const vibePool = rankVibePool(vibe.filter((s) => !excluded.has(s.id)));
+  // Theme fit (when tagged) + gem score with jitter
+  const vibePool = rankVibePool(
+    vibe.filter((s) => !excluded.has(s.id)),
+    tag,
+  );
   const merged: SpotRow[] = [];
   const assignments = new Map<string, FeedSlotSource>();
   const seen = new Set<string>();
@@ -402,7 +413,13 @@ export async function runFeedAnalyze(
     };
 
     eligibleAtRadius = countEligible(classic, vibe, allExcluded);
-    const batch = buildFeedPoolWithDebug(classic, vibe, allExcluded, effectiveConfig);
+    const batch = buildFeedPoolWithDebug(
+      classic,
+      vibe,
+      allExcluded,
+      effectiveConfig,
+      tag,
+    );
     usedRadiusM = radiusM;
 
     if (batch.rows.length > spots.length) {
@@ -620,11 +637,13 @@ export async function runFeedEngine(
 
   for (let step = 0; step < radiusSteps.length; step++) {
     const radiusM = radiusSteps[step];
-    // Production: widen DB query only — never force Google ingest on radius expansion.
+    // Widen radius only when the previous step left the eligible pool thin.
+    // On expansion (step > 0), force a fresh Nearby for that larger circle —
+    // otherwise production only re-queries the same 2km-heavy cache and the
+    // 5km step is a no-op. (10km stays admin-only via radiusSteps filter.)
     const shouldForce =
       forceIngest ||
-      (ingestProfile !== "production" &&
-        step > 0 &&
+      (step > 0 &&
         eligibleAtRadius < effectiveConfig.minEligibleSpots);
 
     const ingestStart = Date.now();
@@ -635,6 +654,7 @@ export async function runFeedEngine(
       excludedIds: excludeIds,
       forceFetch: shouldForce,
       ingestProfile,
+      // Expansion forceFetch already bypasses cooldown inside ensureSpotsCached.
       bypassCooldown: forceIngest,
       vibeMinReviews: effectiveConfig.vibeMinReviews,
       vibeMaxReviews: effectiveConfig.vibeMaxReviews,
@@ -680,7 +700,13 @@ export async function runFeedEngine(
     };
 
     eligibleAtRadius = countEligible(classic, vibe, allExcluded);
-    const batch = buildFeedPoolWithDebug(classic, vibe, allExcluded, effectiveConfig);
+    const batch = buildFeedPoolWithDebug(
+      classic,
+      vibe,
+      allExcluded,
+      effectiveConfig,
+      tag,
+    );
 
     if (batch.rows.length > spots.length) {
       spots = batch.rows;

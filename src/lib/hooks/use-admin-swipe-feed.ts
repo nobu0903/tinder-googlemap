@@ -6,7 +6,7 @@ import type { AreaProfile, FeedAlgorithmConfig } from "@/lib/feed/config";
 import type { FeedEngineResult, FeedSpotDebug } from "@/lib/feed/engine";
 import type { IngestApiCalls } from "@/lib/places/ingest";
 import type { FeedSpot, SwipeAction } from "@/types/backend";
-import { MIN_PHOTOS_SKIP_DETAILS } from "@/types/backend";
+import { feedSpotNeedsHydrate } from "@/lib/places/enrichment-gate";
 
 const REFETCH_THRESHOLD = 3;
 
@@ -60,29 +60,33 @@ export function useAdminSwipeFeed({
     if (!active || queueRef.current.length === 0) return;
 
     const candidates = queueRef.current
-      .slice(0, 3)
+      .slice(0, 4)
       .filter(
         (s) =>
-          s.photoCount < MIN_PHOTOS_SKIP_DETAILS &&
+          feedSpotNeedsHydrate(s) &&
           !hydrateRequestedRef.current.has(s.spotId),
       )
       .slice(0, 2);
 
     if (candidates.length === 0) return;
 
-    for (const s of candidates) hydrateRequestedRef.current.add(s.spotId);
+    const candidateIds = candidates.map((s) => s.spotId);
+    for (const id of candidateIds) hydrateRequestedRef.current.add(id);
 
     try {
       const res = await fetch("/api/spots/hydrate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          spotIds: candidates.map((s) => s.spotId),
+          spotIds: candidateIds,
           lat,
           lng,
         }),
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        for (const id of candidateIds) hydrateRequestedRef.current.delete(id);
+        return;
+      }
 
       const data = (await res.json()) as { spots?: FeedSpot[] };
       const hydrated = data.spots ?? [];
@@ -96,6 +100,7 @@ export function useAdminSwipeFeed({
       const byId = new Map(hydrated.map((s) => [s.spotId, s]));
       setQueue((prev) => prev.map((s) => byId.get(s.spotId) ?? s));
     } catch {
+      for (const id of candidateIds) hydrateRequestedRef.current.delete(id);
       // non-fatal
     }
   }, [active, lat, lng]);

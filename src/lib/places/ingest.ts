@@ -10,7 +10,6 @@ import type {
 } from "@/types/backend";
 import {
   MAX_STORED_PHOTOS,
-  MIN_PHOTOS_SKIP_DETAILS,
 } from "@/types/backend";
 import {
   isDiningPlace,
@@ -23,9 +22,17 @@ import {
   markIngestCompleted,
 } from "@/lib/places/ingest-cooldown";
 import { DEFAULT_FEED_CONFIG } from "@/lib/feed/config";
+import {
+  DETAILS_FULL_FIELD_MASK,
+  detailsFieldMask,
+  isHoursUnavailableStub,
+  needsDetailsEnrichment,
+  stripHoursUnavailableStub,
+} from "@/lib/places/enrichment-gate";
 
 const GOOGLE_PLACES_BASE = "https://places.googleapis.com/v1";
-const CACHE_TTL_DAYS = 30;
+/** Days before a cached spot is considered stale for freshness queries */
+export const CACHE_TTL_DAYS = 30;
 /** Minimum review count to cache — matches feed noise floor (60) */
 const MIN_CACHE_REVIEW_COUNT = DEFAULT_FEED_CONFIG.vibeMinReviews;
 const MIN_CACHED_SPOTS = 20;
@@ -90,37 +97,19 @@ export const EMPTY_INGEST_API_CALLS: IngestApiCalls = {
   placeDetails: 0,
 };
 
-/** Lean search mask — no opening hours / types (lower SKU than full Pro fields) */
+/** Nearby / Text Search field mask — includes address + weekly hours (pre–cost-cut design). */
 const SEARCH_FIELD_MASK = [
   "places.id",
   "places.displayName",
+  "places.formattedAddress",
   "places.rating",
   "places.userRatingCount",
   "places.priceLevel",
   "places.primaryType",
   "places.photos",
+  "places.currentOpeningHours",
   "places.location",
 ].join(",");
-
-/** Full details when metadata is missing */
-const DETAILS_FULL_FIELD_MASK = [
-  "id",
-  "displayName",
-  "formattedAddress",
-  "rating",
-  "userRatingCount",
-  "priceLevel",
-  "primaryType",
-  "photos",
-  "currentOpeningHours",
-  "location",
-  // Advanced fields — used for Hotpepper phone-number matching and Google Reserve fallback
-  "nationalPhoneNumber",
-  "reservationUri",
-].join(",");
-
-/** Photos-only details — cheapest refresh when search already cached metadata */
-const DETAILS_PHOTOS_FIELD_MASK = "id,photos";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -159,9 +148,12 @@ function normalizePriceLevel(raw: number | string | undefined): number | null {
   return map[raw] ?? null;
 }
 
-/** Build a served photo URL from a Google Places photo resource name. */
+/**
+ * Store a keyless Places media URL (resource identity + preferred width).
+ * Clients never see this directly — APIs rewrite via `toClientPhotoUrl` → `/api/photo`.
+ */
 function buildPhotoUrl(photoName: string, maxWidth = 800): string {
-  return `${GOOGLE_PLACES_BASE}/${photoName}/media?maxWidthPx=${maxWidth}&key=${process.env.GOOGLE_PLACES_API_KEY}`;
+  return `${GOOGLE_PLACES_BASE}/${photoName}/media?maxWidthPx=${maxWidth}`;
 }
 
 function mapPhotosFromPlace(
@@ -177,18 +169,28 @@ function mapPhotosFromPlace(
   );
 }
 
-/** Derive a rough vibe_tags list from price level and opening hours. */
+/** Derive vibe_tags from price, rating, type, and hours (best-effort). */
 function deriveVibeTags(place: GooglePlacesPlace): string[] {
   const tags: string[] = [];
   const priceLevel = normalizePriceLevel(place.priceLevel);
+  const primaryType = place.primaryType ?? "";
 
-  if (priceLevel !== null) {
+    if (priceLevel !== null) {
     if (priceLevel <= 1) tags.push("budget-eat");
-    if (priceLevel >= 3) tags.push("splurge");
+    // Align with Explore THEME_TAG_MAP ("date-night" / "treat-yourself" → splurge)
+    if (priceLevel >= 2) tags.push("splurge");
+    if (priceLevel >= 2) tags.push("date");
+  } else if (
+    primaryType === "cafe" ||
+    primaryType === "coffee_shop" ||
+    primaryType === "bakery" ||
+    primaryType === "meal_takeaway"
+  ) {
+    tags.push("budget-eat");
   }
 
-  if (place.rating !== undefined) {
-    if (place.rating >= 4.5) tags.push("top-rated");
+  if (place.rating !== undefined && place.rating >= 4.2) {
+    tags.push("top-rated");
   }
 
   const periods = place.currentOpeningHours?.periods ?? [];
@@ -216,7 +218,12 @@ export function mapPlaceToRow(
   place: GooglePlacesPlace,
   existing?: Partial<SpotRow>,
 ): SpotRow {
-  const photos = mapPhotosFromPlace(place);
+  const searchedPhotos = mapPhotosFromPlace(place);
+  // Search may return fewer/no photos; keep enriched/cached photos when empty.
+  const photos =
+    searchedPhotos.length > 0
+      ? searchedPhotos
+      : (existing?.photos ?? []);
 
   return {
     id: place.id,
@@ -243,29 +250,6 @@ export function mapPlaceToRow(
     booking_url: existing?.booking_url ?? null,
   };
 }
-
-function photoCount(row: SpotRow | null | undefined): number {
-  return row?.photos?.length ?? 0;
-}
-
-function needsDetailsEnrichment(
-  row: SpotRow | null,
-  forceIfSparse: boolean,
-): boolean {
-  if (!forceIfSparse) return false;
-  if (!row) return true;
-  if (photoCount(row) >= MIN_PHOTOS_SKIP_DETAILS) return false;
-  return true;
-}
-
-function detailsFieldMask(row: SpotRow | null): string {
-  if (row?.name && row.lat && row.lng) {
-    return DETAILS_PHOTOS_FIELD_MASK;
-  }
-  return DETAILS_FULL_FIELD_MASK;
-}
-
-// ── Google API calls ──────────────────────────────────────────────────────────
 
 async function fetchPlaceDetails(
   placeId: string,
@@ -301,6 +285,7 @@ async function fetchNearbyPlacesByType(
     excludedTypes: ["lodging"],
     excludedPrimaryTypes: EXCLUDED_PRIMARY_TYPES,
     maxResultCount: 20,
+    languageCode: "ja",
     locationRestriction: {
       circle: {
         center: { latitude: lat, longitude: lng },
@@ -345,6 +330,7 @@ async function fetchNearbyPlacesCombined(
     excludedTypes: ["lodging"],
     excludedPrimaryTypes: EXCLUDED_PRIMARY_TYPES,
     maxResultCount: 20,
+    languageCode: "ja",
     locationRestriction: {
       circle: {
         center: { latitude: lat, longitude: lng },
@@ -612,36 +598,77 @@ async function resolveBookingUrl(
 // ── Enrichment ────────────────────────────────────────────────────────────────
 
 /**
- * Hydrate a single spot via Place Details when cache is missing/stale and
- * fewer than MAX_STORED_PHOTOS photos are stored.
+ * Hydrate a single spot via Place Details when photos are sparse and/or
+ * the booking pipeline has not run yet (see enrichment-gate).
  */
 export async function enrichSpotFromDetails(
   spotId: string,
   cachedRow?: SpotRow | null,
   apiCalls?: IngestApiCalls,
 ): Promise<SpotRow | null> {
-  if (!needsDetailsEnrichment(cachedRow ?? null, true)) {
+  const cleanedCached = cachedRow
+    ? {
+        ...cachedRow,
+        opening_hours: stripHoursUnavailableStub(cachedRow.opening_hours),
+      }
+    : null;
+
+  if (!needsDetailsEnrichment(cleanedCached)) {
     return cachedRow ?? null;
   }
 
   if (apiCalls) apiCalls.placeDetails += 1;
   const details = await fetchPlaceDetails(
     spotId,
-    detailsFieldMask(cachedRow ?? null),
+    detailsFieldMask(cleanedCached),
   );
-  if (!details) return cachedRow ?? null;
 
-  const enriched = mapPlaceToRow(details, cachedRow ?? undefined);
+  // Even if Details fails, Hotpepper can match on name/lat/lng from cache.
+  if (!details) {
+    if (
+      cleanedCached &&
+      cleanedCached.booking_url == null &&
+      cleanedCached.hotpepper_url == null
+    ) {
+      const { hotpepperUrl, bookingUrl } =
+        await resolveBookingUrl(cleanedCached);
+      const fallback: SpotRow = {
+        ...cleanedCached,
+        hotpepper_url: hotpepperUrl ?? "",
+        booking_url: bookingUrl,
+        updated_at: new Date().toISOString(),
+      };
+      const { error } = await supabaseAdmin
+        .from("spots")
+        .upsert(fallback, { onConflict: "id" });
+      if (error) {
+        console.warn(
+          `[ingest] Booking fallback upsert failed for ${spotId}: ${error.message}`,
+        );
+        return cachedRow ?? null;
+      }
+      return fallback;
+    }
+    return cachedRow ?? null;
+  }
+
+  const enriched = mapPlaceToRow(details, cleanedCached ?? undefined);
   if (!isDiningPlace(details) && !isDiningSpotRow(enriched)) {
     return null;
   }
 
   // Resolve affiliate booking URL (Hotpepper → ValueCommerce, Google Reserve, or null).
   // Only run when booking fields are not already filled to avoid redundant API calls.
-  if (enriched.booking_url === null) {
+  if (enriched.booking_url === null && enriched.hotpepper_url == null) {
     const { hotpepperUrl, bookingUrl } = await resolveBookingUrl(enriched);
-    enriched.hotpepper_url = hotpepperUrl;
+    // "" = checked, no match — prevents infinite re-Details (do NOT stub opening_hours)
+    enriched.hotpepper_url = hotpepperUrl ?? "";
     enriched.booking_url = bookingUrl;
+  }
+
+  // Clear legacy "Hours not available" stub if Google still gave us nothing useful
+  if (isHoursUnavailableStub(enriched.opening_hours)) {
+    enriched.opening_hours = null;
   }
 
   const { error } = await supabaseAdmin
@@ -677,11 +704,6 @@ export async function hydrateFeedSpots(
   let detailsUsed = 0;
 
   for (const row of rows) {
-    if (photoCount(row) >= MIN_PHOTOS_SKIP_DETAILS) {
-      results.push(row);
-      continue;
-    }
-
     const { data: cached } = await supabaseAdmin
       .from("spots")
       .select("*")
@@ -689,7 +711,7 @@ export async function hydrateFeedSpots(
       .maybeSingle();
 
     const source = (cached as SpotRow | null) ?? row;
-    if (!needsDetailsEnrichment(source, true)) {
+    if (!needsDetailsEnrichment(source)) {
       results.push(source);
       continue;
     }
@@ -838,7 +860,25 @@ async function upsertPlacesFromGoogle(
   );
   if (diningPlaces.length === 0) return 0;
 
-  const rows: SpotRow[] = diningPlaces.map((place) => mapPlaceToRow(place));
+  const ids = diningPlaces.map((p) => p.id);
+  const { data: existingData, error: existingError } = await supabaseAdmin
+    .from("spots")
+    .select("*")
+    .in("id", ids);
+
+  if (existingError) {
+    throw new Error(`Supabase select error: ${existingError.message}`);
+  }
+
+  const existingById = new Map(
+    (existingData ?? []).map((row) => [row.id as string, row as SpotRow]),
+  );
+
+  // Merge with existing so Search (lean field mask) does not null out
+  // booking_url / opening_hours / address / phone from Details enrichment.
+  const rows: SpotRow[] = diningPlaces.map((place) =>
+    mapPlaceToRow(place, existingById.get(place.id)),
+  );
 
   const { error } = await supabaseAdmin
     .from("spots")
