@@ -46,6 +46,7 @@ export function CollectionPhoto({
         fill
         sizes={sizes}
         priority={priority}
+        unoptimized
         loading={priority ? "eager" : "lazy"}
         onLoad={() => setIsLoaded(true)}
         className={cn(

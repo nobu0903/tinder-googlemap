@@ -152,7 +152,7 @@ function normalizePriceLevel(raw: number | string | undefined): number | null {
  * Store a keyless Places media URL (resource identity + preferred width).
  * Clients never see this directly — APIs rewrite via `toClientPhotoUrl` → `/api/photo`.
  */
-function buildPhotoUrl(photoName: string, maxWidth = 800): string {
+function buildPhotoUrl(photoName: string, maxWidth = 480): string {
   return `${GOOGLE_PLACES_BASE}/${photoName}/media?maxWidthPx=${maxWidth}`;
 }
 

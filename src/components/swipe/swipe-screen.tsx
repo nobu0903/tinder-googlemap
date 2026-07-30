@@ -18,6 +18,7 @@ import { buildLoginPath } from "@/lib/auth/safe-redirect";
 import { EXPLORE_THEMES } from "@/lib/explore-mock";
 import { useLang } from "@/lib/i18n/context";
 import { translations } from "@/lib/i18n/translations";
+import { coverPhotoUrl, preloadPhotoUrls } from "@/lib/photos/preload";
 import {
   feedItemKey,
   isFeedNativeAd,
@@ -81,6 +82,7 @@ export function SwipeScreen() {
 
   const {
     currentItem,
+    nextItem,
     isInitialLoading,
     isRefetching,
     error,
@@ -92,6 +94,14 @@ export function SwipeScreen() {
     coords,
     enabled: feedEnabled,
   });
+
+  // Prefetch next card cover only — same /api/photo URL as unoptimized <Image>,
+  // so browser cache absorbs the second hit (no double Place Photo billing).
+  useEffect(() => {
+    if (!nextItem || isFeedNativeAd(nextItem)) return;
+    const url = coverPhotoUrl(nextItem);
+    if (url) preloadPhotoUrls([url]);
+  }, [nextItem]);
 
   const handleSwipe = (action: SwipeAction) => {
     if (!currentItem) return;

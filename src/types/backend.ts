@@ -79,6 +79,12 @@ export const MIN_PHOTOS_SKIP_DETAILS = 3;
 /** Collection list card image width (px) — cards are ~400 CSS px tall/wide */
 export const COLLECTION_CARD_PHOTO_WIDTH = 400;
 
+/**
+ * Swipe card photo maxWidthPx for Google Place Photo / `/api/photo`.
+ * Cards are ~400 CSS px; 480 covers light retina without the old 800px payload.
+ */
+export const SWIPE_CARD_PHOTO_WIDTH = 480;
+
 /** Max Place Details calls per production feed batch (0 = lazy client hydrate only) */
 export const PRODUCTION_MAX_DETAILS_PER_FEED = 0;
 

@@ -15,18 +15,25 @@ declare global {
   }
 }
 
+/**
+ * Display ad unit (AdSense snippet: format=auto, full-width-responsive).
+ * Must match the unit type created in AdSense — "fluid" is for In-feed only
+ * and returns HTTP 400 when used with a Display slot.
+ */
 export function NativeAdCard({ ad, className }: NativeAdCardProps) {
-  const insRef = useRef<HTMLModElement>(null);
+  const pushedRef = useRef(false);
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_ADSENSE_CLIENT_ID;
   const slotId = process.env.NEXT_PUBLIC_GOOGLE_ADSENSE_SLOT_ID;
   const canRenderAd = Boolean(clientId && slotId);
 
   useEffect(() => {
-    if (!canRenderAd || !insRef.current) return;
+    if (!canRenderAd || pushedRef.current) return;
+    pushedRef.current = true;
     try {
       (window.adsbygoogle = window.adsbygoogle || []).push({});
     } catch {
-      // AdSense not loaded yet — placeholder remains visible
+      // AdSense not loaded yet — empty slot remains
+      pushedRef.current = false;
     }
   }, [canRenderAd]);
 
@@ -45,12 +52,11 @@ export function NativeAdCard({ ad, className }: NativeAdCardProps) {
 
         {canRenderAd ? (
           <ins
-            ref={insRef}
-            className="adsbygoogle block w-full min-h-[280px]"
+            className="adsbygoogle"
             style={{ display: "block" }}
             data-ad-client={clientId}
             data-ad-slot={slotId}
-            data-ad-format="fluid"
+            data-ad-format="auto"
             data-full-width-responsive="true"
           />
         ) : (

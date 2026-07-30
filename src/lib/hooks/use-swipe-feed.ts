@@ -28,6 +28,8 @@ interface UseSwipeFeedOptions {
 
 interface UseSwipeFeedReturn {
   currentItem: SwipeFeedItem | null;
+  /** Peek at queue[1] for cover-photo prefetch (null if empty / ad-only next). */
+  nextItem: SwipeFeedItem | null;
   queueLength: number;
   isInitialLoading: boolean;
   isRefetching: boolean;
@@ -307,6 +309,7 @@ export function useSwipeFeed({
 
   return {
     currentItem: queue[0] ?? null,
+    nextItem: queue[1] ?? null,
     queueLength: queue.length,
     isInitialLoading,
     isRefetching,

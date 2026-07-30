@@ -43,6 +43,10 @@ describe("toClientPhotoUrl", () => {
     expect(client).not.toContain("SECRET");
     expect(client).not.toContain("key=");
   });
+  it("defaults to swipe card width (480)", () => {
+    const client = toClientPhotoUrl(RESOURCE);
+    expect(client).toContain("maxWidthPx=480");
+  });
 });
 
 describe("withPhotoMaxWidth", () => {
