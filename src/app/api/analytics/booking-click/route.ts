@@ -33,12 +33,17 @@ export async function POST(req: NextRequest) {
     userId = data.user?.id ?? null;
   }
 
-  await supabaseAdmin.from("booking_clicks").insert({
+  const { error } = await supabaseAdmin.from("booking_clicks").insert({
     spot_id: spotId,
     booking_url: bookingUrl,
     booking_tier: tier,
     user_id: userId,
   });
+
+  if (error) {
+    console.error("[POST /api/analytics/booking-click]", error.message);
+    return NextResponse.json({ ok: false }, { status: 500 });
+  }
 
   return NextResponse.json({ ok: true });
 }

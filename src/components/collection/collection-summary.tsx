@@ -1,4 +1,3 @@
-import Image from "next/image";
 import { Heart } from "lucide-react";
 import type { LikedSpot } from "@/types/backend";
 
@@ -9,6 +8,26 @@ interface CollectionSummaryProps {
   previewSpots: LikedSpot[];
 }
 
+/** Stable pastel from spot id — no network, avoids competing with list photo loads. */
+function avatarTone(spotId: string): string {
+  const tones = [
+    "bg-electric-chilli/35",
+    "bg-honey/30",
+    "bg-basil/30",
+    "bg-chilli-bright/25",
+    "bg-white/12",
+  ];
+  let hash = 0;
+  for (let i = 0; i < spotId.length; i++) {
+    hash = (hash + spotId.charCodeAt(i) * (i + 1)) % tones.length;
+  }
+  return tones[hash] ?? tones[0];
+}
+
+/**
+ * Summary header. Preview circles are decorative (no Google photo fetch)
+ * so the list owns all image bandwidth.
+ */
 export function CollectionSummary({
   totalCount,
   isLoading = false,
@@ -34,7 +53,7 @@ export function CollectionSummary({
           {previewSpots.slice(0, 5).map((spot, index) => (
             <div
               key={spot.spotId}
-              className="absolute overflow-hidden rounded-full ring-2 ring-midnight"
+              className={`absolute flex items-center justify-center overflow-hidden rounded-full ring-2 ring-midnight ${avatarTone(spot.spotId)}`}
               style={{
                 width: 44,
                 height: 44,
@@ -42,18 +61,11 @@ export function CollectionSummary({
                 top: index % 2 === 0 ? 0 : 12,
                 zIndex: 5 - index,
               }}
+              title={spot.name}
             >
-              {spot.photos[0] ? (
-                <Image
-                  src={spot.photos[0].url}
-                  alt={spot.name}
-                  fill
-                  sizes="44px"
-                  className="object-cover"
-                />
-              ) : (
-                <div className="size-full bg-surface-raised" />
-              )}
+              <span className="text-[13px] font-black text-text-primary/90">
+                {spot.name.trim().charAt(0).toUpperCase() || "·"}
+              </span>
             </div>
           ))}
           <div className="absolute -bottom-1 right-0 z-10 flex size-8 items-center justify-center rounded-full bg-white shadow-md">

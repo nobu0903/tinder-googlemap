@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { Heart, Lock } from "lucide-react";
+import { useLang } from "@/lib/i18n/context";
 
 export function CollectionGate() {
+  const { t } = useLang();
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-8 pb-28 text-center">
-      {/* Icon */}
       <div className="relative mb-7">
         <div className="flex size-[72px] items-center justify-center rounded-full bg-surface-raised ring-1 ring-white/8">
           <Heart
@@ -19,24 +20,21 @@ export function CollectionGate() {
         </div>
       </div>
 
-      {/* Copy */}
       <h2 className="text-xl font-black tracking-tight text-text-primary">
-        Your likes live here
+        {t("collectionGate.title")}
       </h2>
       <p className="mt-2.5 max-w-[260px] text-sm leading-relaxed text-text-muted">
-        Sign in to save your liked spots and build a personal collection that
-        follows you across sessions.
+        {t("collectionGate.desc")}
       </p>
 
-      {/* CTA */}
       <Link
         href="/login?redirect=/collection"
         className="mt-8 flex h-12 w-full max-w-[240px] items-center justify-center rounded-xl bg-electric-chilli text-sm font-bold text-text-primary shadow-[0_4px_20px_rgba(224,62,0,0.35)] transition-all active:scale-[0.98] hover:shadow-[0_6px_28px_rgba(224,62,0,0.5)]"
       >
-        Sign in or Create account
+        {t("collectionGate.signInOrCreate")}
       </Link>
 
-      <p className="mt-4 text-xs text-stealth">Free &amp; takes 30 seconds</p>
+      <p className="mt-4 text-xs text-stealth">{t("collectionGate.freeAndFast")}</p>
     </div>
   );
 }

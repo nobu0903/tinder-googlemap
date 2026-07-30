@@ -1,4 +1,5 @@
 import type { SpotRow } from "@/types/backend";
+import { themeMatchScore } from "@/lib/explore/theme-match";
 
 /**
  * Hidden-gem score for vibe-pool ranking.
@@ -33,11 +34,15 @@ export function gemScore(row: SpotRow): number {
 /**
  * Sort vibe candidates by gem score with strong jitter so the same
  * high-scoring spots don't dominate every session.
+ * When `tag` is set, theme fit dominates so Explore themes stay on-brief.
  */
-export function rankVibePool(rows: SpotRow[]): SpotRow[] {
+export function rankVibePool(rows: SpotRow[], tag?: string): SpotRow[] {
   const scored = rows.map((row) => ({
     row,
-    score: gemScore(row) + Math.random() * 28,
+    score:
+      (tag ? themeMatchScore(row, tag) * 3 : 0) +
+      gemScore(row) +
+      Math.random() * 28,
   }));
   scored.sort((a, b) => b.score - a.score);
   return scored.map((s) => s.row);

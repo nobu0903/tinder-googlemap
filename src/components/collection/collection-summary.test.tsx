@@ -49,15 +49,17 @@ describe("CollectionSummary", () => {
     expect(screen.getByText("…")).toBeInTheDocument();
   });
 
-  it("renders preview photo alt text", () => {
-    render(
+  it("renders decorative preview initials without loading photos", () => {
+    const { container } = render(
       <CollectionSummary
         totalCount={1}
         previewSpots={[makeSpot({ name: "Soul Noodles" })]}
       />,
     );
 
-    expect(screen.getByAltText("Soul Noodles")).toBeInTheDocument();
+    expect(screen.getByTitle("Soul Noodles")).toBeInTheDocument();
+    expect(screen.getByText("S")).toBeInTheDocument();
+    expect(container.querySelector("img")).toBeNull();
   });
 
   it("hides preview stack when there are no spots", () => {
@@ -65,6 +67,6 @@ describe("CollectionSummary", () => {
       <CollectionSummary totalCount={0} previewSpots={[]} />,
     );
 
-    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector("[title]")).toBeNull();
   });
 });

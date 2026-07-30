@@ -2,33 +2,34 @@
 
 import { useCallback, useEffect } from "react";
 import { MapPin, Clock, ChevronRight, CalendarCheck } from "lucide-react";
+import { GoogleMapsIcon } from "@/components/icons/google-maps-icon";
 import { cn } from "@/lib/utils";
 import { buildGoogleMapsPlaceUrl } from "@/types/backend";
+import { useLang } from "@/lib/i18n/context";
 import type { BookingClickPayload, FeedSpot } from "@/types/backend";
 
-function GoogleMapsIcon() {
-  return (
-    <svg viewBox="0 0 40 40" className="size-8 shrink-0" aria-hidden>
-      <circle cx="20" cy="20" r="20" fill="white" />
-      <path
-        fill="#EA4335"
-        d="M20 8c-5.52 0-10 4.48-10 10 0 7.5 10 18 10 18s10-10.5 10-18c0-5.52-4.48-10-10-10z"
-      />
-      <circle cx="20" cy="18" r="3.5" fill="#B31412" />
-    </svg>
+function HoursTable({
+  descriptions,
+  t,
+}: {
+  descriptions: string[];
+  t: (key: string) => string;
+}) {
+  const lines = descriptions.filter(
+    (line) => line.trim() && line !== "Hours not available",
   );
-}
 
-function HoursTable({ descriptions }: { descriptions: string[] }) {
-  if (descriptions.length === 0) {
+  if (lines.length === 0) {
     return (
-      <p className="mt-2 text-[12px] text-text-muted">Hours not available</p>
+      <p className="mt-2 text-[12px] text-text-muted">
+        {t("moreInfo.hoursNotAvailable")}
+      </p>
     );
   }
 
   return (
     <div className="mt-2 space-y-1.5">
-      {descriptions.map((line) => (
+      {lines.map((line) => (
         <p key={line} className="text-[12px] text-text-muted">
           {line}
         </p>
@@ -44,8 +45,14 @@ interface MoreInfoPanelProps {
   accessToken?: string | null;
 }
 
-export function MoreInfoPanel({ isOpen, onClose, spot, accessToken }: MoreInfoPanelProps) {
+export function MoreInfoPanel({
+  isOpen,
+  onClose,
+  spot,
+  accessToken,
+}: MoreInfoPanelProps) {
   const mapsUrl = buildGoogleMapsPlaceUrl(spot.spotId, spot.name);
+  const { t } = useLang();
 
   useEffect(() => {
     document.body.style.overflow = isOpen ? "hidden" : "";
@@ -54,17 +61,26 @@ export function MoreInfoPanel({ isOpen, onClose, spot, accessToken }: MoreInfoPa
     };
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isOpen, onClose]);
+
   const handleBookingClick = useCallback(() => {
     if (!spot.bookingUrl) return;
 
-    // Determine tier from URL pattern for analytics
-    const tier: BookingClickPayload["tier"] = spot.bookingUrl.includes("valuecommerce")
+    const tier: BookingClickPayload["tier"] = spot.bookingUrl.includes(
+      "valuecommerce",
+    )
       ? 1
       : spot.bookingUrl.includes("google.com/maps")
         ? 3
         : 2;
 
-    // Fire-and-forget analytics (non-blocking)
     const payload: BookingClickPayload = {
       spotId: spot.spotId,
       bookingUrl: spot.bookingUrl,
@@ -88,14 +104,16 @@ export function MoreInfoPanel({ isOpen, onClose, spot, accessToken }: MoreInfoPa
         onClick={onClose}
         className={cn(
           "absolute inset-0 z-20 bg-black/60 backdrop-blur-[2px] transition-opacity duration-300",
-          isOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
+          isOpen
+            ? "opacity-100 pointer-events-auto"
+            : "opacity-0 pointer-events-none",
         )}
       />
 
       <div
         role="dialog"
         aria-modal
-        aria-label="Restaurant details"
+        aria-label={t("moreInfo.ariaLabel")}
         className={cn(
           "absolute inset-x-0 bottom-0 top-12 z-30 flex flex-col rounded-t-[28px] bg-surface shadow-[0_-8px_40px_rgba(0,0,0,0.6)]",
           "transition-transform duration-400 ease-[cubic-bezier(0.32,0.72,0,1)]",
@@ -112,15 +130,17 @@ export function MoreInfoPanel({ isOpen, onClose, spot, accessToken }: MoreInfoPa
               {spot.name}
             </h2>
             <p className="mt-1.5 flex items-center gap-2 text-[13px]">
-              {spot.isOpen && spot.todayClose ? (
+              {spot.isOpen ? (
                 <span className="flex items-center gap-1 font-semibold text-basil">
                   <span className="inline-block size-2 rounded-full bg-basil" />
-                  Open until {spot.todayClose}
+                  {spot.todayClose
+                    ? t("moreInfo.openUntil").replace("{time}", spot.todayClose)
+                    : t("moreInfo.openNow")}
                 </span>
               ) : (
                 <span className="flex items-center gap-1 font-semibold text-text-muted">
                   <span className="inline-block size-2 rounded-full bg-text-muted" />
-                  Closed
+                  {t("moreInfo.closed")}
                 </span>
               )}
               <span className="text-text-muted/40">·</span>
@@ -128,7 +148,6 @@ export function MoreInfoPanel({ isOpen, onClose, spot, accessToken }: MoreInfoPa
             </p>
           </div>
 
-          {/* Book a Table — only shown when Tier 1 (Hotpepper) or Tier 2 (Google Reserve) is available */}
           {spot.bookingUrl && (
             <button
               type="button"
@@ -140,12 +159,12 @@ export function MoreInfoPanel({ isOpen, onClose, spot, accessToken }: MoreInfoPa
               </div>
               <div className="min-w-0 flex-1 text-left">
                 <p className="text-[15px] font-bold leading-tight text-white">
-                  予約する / Book a Table
+                  {t("moreInfo.bookTable")}
                 </p>
                 <p className="text-xs font-medium text-white/75">
                   {spot.bookingUrl.includes("valuecommerce")
-                    ? "Hotpepper Gourmet"
-                    : "Online Reservation"}
+                    ? t("moreInfo.hotpepper")
+                    : t("moreInfo.onlineReservation")}
                 </p>
               </div>
               <ChevronRight className="size-5 shrink-0 text-white" />
@@ -154,43 +173,47 @@ export function MoreInfoPanel({ isOpen, onClose, spot, accessToken }: MoreInfoPa
 
           <button
             type="button"
-            onClick={() => window.open(mapsUrl, "_blank")}
+            onClick={() =>
+              window.open(mapsUrl, "_blank", "noopener,noreferrer")
+            }
             className="mb-5 flex w-full items-center gap-3 rounded-2xl bg-gradient-to-r from-electric-chilli to-chilli-bright px-4 py-3.5 shadow-[0_6px_24px_rgba(224,62,0,0.4)] transition-transform active:scale-[0.98] hover:shadow-[0_8px_28px_rgba(224,62,0,0.55)]"
           >
             <GoogleMapsIcon />
             <div className="min-w-0 flex-1 text-left">
               <p className="text-[15px] font-bold leading-tight text-text-primary">
-                Open in Google Maps
+                {t("moreInfo.openInMaps")}
               </p>
               <p className="text-xs font-medium text-text-primary/75">
-                Get directions
+                {t("moreInfo.getDirections")}
               </p>
             </div>
             <ChevronRight className="size-5 shrink-0 text-text-primary" />
           </button>
 
-          {/* Rating summary from Google Places */}
           <div className="mb-5 rounded-xl border border-white/6 bg-surface-raised px-4 py-3">
             <h3 className="text-[15px] font-black text-text-primary">
-              Google Rating
+              {t("moreInfo.googleRating")}
             </h3>
             {spot.rating !== null ? (
               <p className="mt-1.5 text-[13px] text-text-muted">
                 <span className="text-honey">⭐ {spot.rating}</span>
                 {spot.reviewCount !== null && (
-                  <span> · {spot.reviewCount} reviews</span>
+                  <span>
+                    {" "}
+                    · {spot.reviewCount} {t("moreInfo.reviews")}
+                  </span>
                 )}
               </p>
             ) : (
               <p className="mt-1.5 text-[12px] text-text-muted">
-                No rating available
+                {t("moreInfo.noRating")}
               </p>
             )}
           </div>
 
           <div className="pb-4">
             <h3 className="mb-3 text-[15px] font-black text-text-primary">
-              Basic Info
+              {t("moreInfo.basicInfo")}
             </h3>
 
             {spot.address && (
@@ -206,10 +229,10 @@ export function MoreInfoPanel({ isOpen, onClose, spot, accessToken }: MoreInfoPa
               <div className="flex items-center gap-3">
                 <Clock className="size-4 shrink-0 text-stealth" />
                 <span className="flex-1 text-left text-[13px] font-medium text-text-muted">
-                  Business hours
+                  {t("moreInfo.businessHours")}
                 </span>
               </div>
-              <HoursTable descriptions={spot.weekdayDescriptions} />
+              <HoursTable descriptions={spot.weekdayDescriptions} t={t} />
             </div>
           </div>
         </div>

@@ -2,7 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
+import { safeInternalRedirect } from "@/lib/auth/safe-redirect";
 import { supabase } from "@/lib/supabase/client";
+
+interface AuthRedirectOptions {
+  /** Path to open after email confirmation (relative, e.g. /?theme=...) */
+  next?: string;
+}
 
 interface UseAuthReturn {
   user: User | null;
@@ -10,9 +16,26 @@ interface UseAuthReturn {
   accessToken: string | null;
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
-  signUp: (email: string, password: string) => Promise<{ error: string | null }>;
-  resendConfirmation: (email: string) => Promise<{ error: string | null }>;
+  signUp: (
+    email: string,
+    password: string,
+    options?: AuthRedirectOptions,
+  ) => Promise<{ error: string | null }>;
+  resendConfirmation: (
+    email: string,
+    options?: AuthRedirectOptions,
+  ) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
+}
+
+function buildConfirmRedirectUrl(next?: string): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const safeNext = safeInternalRedirect(next, "/");
+  const url = new URL("/auth/confirm", window.location.origin);
+  if (safeNext !== "/") {
+    url.searchParams.set("next", safeNext);
+  }
+  return url.toString();
 }
 
 export function useAuth(): UseAuthReturn {
@@ -45,33 +68,31 @@ export function useAuth(): UseAuthReturn {
     return { error: error?.message ?? null };
   }, []);
 
-  const signUp = useCallback(async (email: string, password: string) => {
-    const emailRedirectTo =
-      typeof window !== "undefined"
-        ? `${window.location.origin}/auth/confirm`
-        : undefined;
+  const signUp = useCallback(
+    async (email: string, password: string, options?: AuthRedirectOptions) => {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { emailRedirectTo: buildConfirmRedirectUrl(options?.next) },
+      });
+      return { error: error?.message ?? null };
+    },
+    [],
+  );
 
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { emailRedirectTo },
-    });
-    return { error: error?.message ?? null };
-  }, []);
-
-  const resendConfirmation = useCallback(async (email: string) => {
-    const { error } = await supabase.auth.resend({
-      type: "signup",
-      email,
-      options: {
-        emailRedirectTo:
-          typeof window !== "undefined"
-            ? `${window.location.origin}/auth/confirm`
-            : undefined,
-      },
-    });
-    return { error: error?.message ?? null };
-  }, []);
+  const resendConfirmation = useCallback(
+    async (email: string, options?: AuthRedirectOptions) => {
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email,
+        options: {
+          emailRedirectTo: buildConfirmRedirectUrl(options?.next),
+        },
+      });
+      return { error: error?.message ?? null };
+    },
+    [],
+  );
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();

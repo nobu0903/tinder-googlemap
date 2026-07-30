@@ -9,13 +9,14 @@ import {
   isFeedNativeAd,
 } from "@/types/backend";
 import type { Coordinates } from "@/lib/hooks/use-location";
+import { feedSpotNeedsHydrate } from "@/lib/places/enrichment-gate";
 
 /** Refetch only when the queue is fully exhausted */
 const REFETCH_WHEN_EMPTY = true;
 /** Minimum gap between /api/swipe calls (ms) */
 const MIN_FEED_FETCH_INTERVAL_MS = 2 * 60 * 1000;
-/** Cap Place Details hydrates per browser session */
-const MAX_SESSION_HYDRATES = 4;
+/** Cap Place Details hydrates per browser session (photos + booking) */
+const MAX_SESSION_HYDRATES = 16;
 
 interface UseSwipeFeedOptions {
   tag?: string;
@@ -104,31 +105,41 @@ export function useSwipeFeed({
 
     const remaining = MAX_SESSION_HYDRATES - sessionHydratesRef.current;
     const candidates = queueRef.current
-      .slice(0, 2)
+      .slice(0, 4)
       .filter(
         (item): item is FeedSpot =>
           !isFeedNativeAd(item) &&
-          item.photoCount === 0 &&
+          feedSpotNeedsHydrate(item) &&
           !hydrateRequestedRef.current.has(item.spotId),
       )
-      .slice(0, Math.min(1, remaining));
+      .slice(0, Math.min(2, remaining));
 
     if (candidates.length === 0) return;
 
-    for (const s of candidates) hydrateRequestedRef.current.add(s.spotId);
-    sessionHydratesRef.current += candidates.length;
+    const candidateIds = candidates.map((s) => s.spotId);
+    for (const id of candidateIds) hydrateRequestedRef.current.add(id);
 
     try {
+      const headers: HeadersInit = { "Content-Type": "application/json" };
+      const token = accessTokenRef.current;
+      if (token) headers.Authorization = `Bearer ${token}`;
+
       const res = await fetch("/api/spots/hydrate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
-          spotIds: candidates.map((s) => s.spotId),
+          spotIds: candidateIds,
           lat: currentCoords.lat,
           lng: currentCoords.lng,
         }),
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        // Allow retry on rate-limit / transient errors
+        for (const id of candidateIds) hydrateRequestedRef.current.delete(id);
+        return;
+      }
+
+      sessionHydratesRef.current += candidateIds.length;
 
       const data = (await res.json()) as { spots?: FeedSpot[] };
       const hydrated = data.spots ?? [];
@@ -142,6 +153,7 @@ export function useSwipeFeed({
         }),
       );
     } catch {
+      for (const id of candidateIds) hydrateRequestedRef.current.delete(id);
       // Non-fatal
     }
   }, []);
@@ -181,7 +193,7 @@ export function useSwipeFeed({
       url.searchParams.set("lng", String(currentCoords.lng));
       if (tagRef.current) url.searchParams.set("tag", tagRef.current);
 
-      const exclude = [...seenSpotIdsRef.current];
+      const exclude = [...seenSpotIdsRef.current].slice(-100);
       if (exclude.length > 0) {
         url.searchParams.set("exclude", exclude.join(","));
       }

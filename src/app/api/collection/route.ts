@@ -2,6 +2,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/server";
+import { toClientPhotoUrl } from "@/lib/places/photo-url";
 import type { LikedSpot, CollectionResponse, SpotRow } from "@/types/backend";
 
 export async function GET(req: NextRequest) {
@@ -70,7 +71,10 @@ export async function GET(req: NextRequest) {
         address: row.address,
         lat: row.lat,
         lng: row.lng,
-        photos: row.photos ?? [],
+        photos: (row.photos ?? []).map((p) => ({
+          ...p,
+          url: toClientPhotoUrl(p.url),
+        })),
         bookingUrl: row.booking_url,
         likedAt: s.created_at,
       };

@@ -234,14 +234,22 @@ export function AdminScreen() {
   };
 
   const clearCache = async () => {
-    if (!confirm("全店舗キャッシュを削除します。全ユーザーのデータが消えます。続行しますか？")) return;
-    if (!confirm("本当に削除しますか？この操作は取り消せません。")) return;
+    if (
+      !confirm(
+        "店舗キャッシュを期限切れにします（soft invalidate）。いいね／Collection は残ります。続行しますか？",
+      )
+    ) {
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      await adminFetch("/api/admin/cache", { method: "DELETE" });
+      const data = (await adminFetch("/api/admin/cache", {
+        method: "DELETE",
+        body: JSON.stringify({ mode: "soft" }),
+      })) as { message?: string };
       setPreview(null);
-      setStatus("Cache cleared.");
+      setStatus(data.message ?? "Cache soft-invalidated. Likes preserved.");
       await loadCache();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Clear failed");
@@ -714,7 +722,7 @@ export function AdminScreen() {
                   onClick={clearCache}
                   className="rounded border border-red-900/60 px-3 py-1.5 text-xs text-red-400 hover:bg-red-950/40 disabled:opacity-50"
                 >
-                  Clear all cache
+                  Invalidate cache (keep likes)
                 </button>
               </div>
               <p className="text-[10px] text-neutral-600">

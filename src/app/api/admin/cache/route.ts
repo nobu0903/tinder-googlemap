@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { adminUnauthorized, verifyAdminRequest } from "@/lib/admin/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { ensureSpotsCached, boundingBox, staleThresholdIso } from "@/lib/places/ingest";
+import {
+  CACHE_TTL_DAYS,
+  boundingBox,
+  ensureSpotsCached,
+  staleThresholdIso,
+} from "@/lib/places/ingest";
 
 export async function GET(req: NextRequest) {
   if (!verifyAdminRequest(req)) return adminUnauthorized();
@@ -31,7 +36,7 @@ export async function GET(req: NextRequest) {
     totalSpots: count ?? 0,
     freshSpots: freshCount ?? 0,
     lastUpdated: latest?.updated_at ?? null,
-    cacheTtlDays: 14,
+    cacheTtlDays: CACHE_TTL_DAYS,
   });
 }
 
@@ -94,17 +99,81 @@ export async function POST(req: NextRequest) {
   }
 }
 
+const DeleteBodySchema = z.object({
+  /**
+   * soft (default): mark spots stale — preserves rows and user likes.
+   * hard: delete all spots (CASCADE-deletes swipes) — requires confirm token.
+   */
+  mode: z.enum(["soft", "hard"]).optional().default("soft"),
+  confirm: z.string().optional(),
+});
+
+export const HARD_DELETE_CONFIRM = "DELETE_ALL_SPOTS_AND_SWIPES";
+
+/**
+ * Default: soft-invalidate cache (safe for likes).
+ * Hard delete only with `{ "mode": "hard", "confirm": "DELETE_ALL_SPOTS_AND_SWIPES" }`.
+ */
 export async function DELETE(req: NextRequest) {
   if (!verifyAdminRequest(req)) return adminUnauthorized();
 
-  const { error } = await supabaseAdmin
+  let raw: unknown = {};
+  try {
+    raw = await req.json();
+  } catch {
+    raw = {};
+  }
+
+  const parsed = DeleteBodySchema.safeParse(raw ?? {});
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid body", details: parsed.error.flatten() },
+      { status: 400 },
+    );
+  }
+
+  const { mode, confirm } = parsed.data;
+
+  if (mode === "hard") {
+    if (confirm !== HARD_DELETE_CONFIRM) {
+      return NextResponse.json(
+        {
+          error:
+            "Hard delete refused. Pass mode:\"hard\" and confirm:\"DELETE_ALL_SPOTS_AND_SWIPES\" (CASCADE-deletes all likes).",
+        },
+        { status: 400 },
+      );
+    }
+
+    const { error } = await supabaseAdmin.from("spots").delete().neq("id", "");
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({
+      ok: true,
+      mode: "hard",
+      message:
+        "All spots deleted. User swipes were removed via ON DELETE CASCADE.",
+    });
+  }
+
+  const staleIso = new Date(0).toISOString();
+  const { error, count } = await supabaseAdmin
     .from("spots")
-    .delete()
+    .update({ updated_at: staleIso }, { count: "exact" })
     .neq("id", "");
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, message: "All spots cache cleared." });
+  return NextResponse.json({
+    ok: true,
+    mode: "soft",
+    updated: count ?? null,
+    message:
+      "Cache soft-invalidated (updated_at → epoch). Likes preserved; next feed will re-ingest.",
+  });
 }

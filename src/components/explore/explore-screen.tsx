@@ -7,14 +7,16 @@ import { ExploreHeader } from "@/components/explore/explore-header";
 import { ThemeGrid } from "@/components/explore/theme-grid";
 import { LocationPicker } from "@/components/location/location-picker";
 import { useLocation } from "@/lib/hooks/use-location";
+import { useLang } from "@/lib/i18n/context";
 import type { Coordinates } from "@/lib/hooks/use-location";
 
 export function ExploreScreen() {
   const { coords, status, setManualCoords } = useLocation();
+  const { t } = useLang();
   const [locationLabel, setLocationLabel] = useState<string | null>(null);
 
   const displayLabel =
-    locationLabel ?? (status === "ready" ? "Near you" : null);
+    locationLabel ?? (status === "ready" ? t("explore.nearYou") : null);
   const needsLocationPicker = status === "denied" || status === "unsupported";
 
   const handleLocationConfirm = (nextCoords: Coordinates, label: string) => {
