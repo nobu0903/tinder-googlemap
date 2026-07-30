@@ -265,7 +265,6 @@ export function useSwipeFeed({
     if (shouldFetch && !fetchingRef.current) {
       void fetchFeedRef.current();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queue.length, enabled, coords]);
 
   const advance = useCallback(() => {
