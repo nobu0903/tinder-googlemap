@@ -16,7 +16,7 @@ export const EXPLORE_THEMES: ExploreTheme[] = [
     subtitle: "Cheap & Happy",
     priceLabel: "~¥1,000",
     imageUrl: "/ramens/ramen1.jpg",
-    imageAlt: "リーズナブルなラーメン",
+    imageAlt: "Affordable ramen bowl",
   },
   {
     id: "date-night",
@@ -25,7 +25,7 @@ export const EXPLORE_THEMES: ExploreTheme[] = [
     subtitle: "Romantic Vibes",
     priceLabel: "¥1,000~2,000",
     imageUrl: "/ramens/ramen2.jpg",
-    imageAlt: "デートにぴったりな料理",
+    imageAlt: "Romantic dining atmosphere",
   },
   {
     id: "treat-yourself",
@@ -34,7 +34,7 @@ export const EXPLORE_THEMES: ExploreTheme[] = [
     subtitle: "A Little Luxury",
     priceLabel: "¥2,000~3,000",
     imageUrl: "/ramens/ramen3.jpg",
-    imageAlt: "贅沢な一品",
+    imageAlt: "Luxurious ramen course",
   },
   {
     id: "need-energy",
@@ -43,7 +43,7 @@ export const EXPLORE_THEMES: ExploreTheme[] = [
     subtitle: "Power Food",
     priceLabel: "~¥2,000",
     imageUrl: "/ramens/ramne4.jpg",
-    imageAlt: "エネルギー補給の料理",
+    imageAlt: "Hearty power-food ramen",
   },
   {
     id: "with-friends",
@@ -52,7 +52,7 @@ export const EXPLORE_THEMES: ExploreTheme[] = [
     subtitle: "Share & Enjoy",
     priceLabel: "~¥1,500",
     imageUrl: "/ramens/ramen5.jpg",
-    imageAlt: "友達とシェアする料理",
+    imageAlt: "Shareable ramen with friends",
   },
   {
     id: "healthy",
@@ -60,7 +60,7 @@ export const EXPLORE_THEMES: ExploreTheme[] = [
     name: "Healthy Choice",
     subtitle: "Clean & Green",
     priceLabel: "~¥1,000",
-    imageUrl: "/ramens/ramen6.jpg",
+    imageUrl: "/ramens/explore/healthy.png",
     imageAlt: "ヘルシーな料理",
   },
   {
@@ -69,7 +69,7 @@ export const EXPLORE_THEMES: ExploreTheme[] = [
     name: "Late Night Bites",
     subtitle: "Open Late",
     priceLabel: "~¥1,000",
-    imageUrl: "/ramens/ramen7.jpg",
+    imageUrl: "/ramens/explore/late-night-bites.png",
     imageAlt: "深夜営業の料理",
   },
   {
@@ -78,7 +78,7 @@ export const EXPLORE_THEMES: ExploreTheme[] = [
     name: "Local Gems",
     subtitle: "Off the Beaten Path",
     priceLabel: "~¥1,500",
-    imageUrl: "/ramens/ramen8.jpg",
+    imageUrl: "/ramens/explore/local-gems.png",
     imageAlt: "隠れた名店",
   },
   {
@@ -87,7 +87,7 @@ export const EXPLORE_THEMES: ExploreTheme[] = [
     name: "Instagrammable",
     subtitle: "Picture Perfect",
     priceLabel: "~¥2,000",
-    imageUrl: "/ramens/ramen1.jpg",
+    imageUrl: "/ramens/explore/instagrammable.png",
     imageAlt: "映える料理",
   },
   {
@@ -96,7 +96,7 @@ export const EXPLORE_THEMES: ExploreTheme[] = [
     name: "Surprise Me",
     subtitle: "Random Picks",
     priceLabel: "All",
-    imageUrl: "/ramens/ramen3.jpg",
+    imageUrl: "/ramens/explore/surprise-me.png",
     imageAlt: "サプライズ",
   },
 ];
