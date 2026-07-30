@@ -2,6 +2,7 @@ export const NAV_TABS = [
   { id: "swipe", label: "SWIPE", emoji: "🔥", href: "/" },
   { id: "explore", label: "EXPLORE", emoji: "🔍", href: "/explore" },
   { id: "collection", label: "COLLECTION", emoji: "📁", href: "/collection" },
+  { id: "settings", label: "SETTINGS", emoji: "👤", href: "/settings" },
 ] as const;
 
 export type NavTabId = (typeof NAV_TABS)[number]["id"];

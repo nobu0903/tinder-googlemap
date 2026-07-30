@@ -1,161 +1,59 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import Image from "next/image";
-import { MapPin, Clock, ChevronRight, Heart } from "lucide-react";
-import { MOCK_SPOT } from "@/lib/constants";
+import { useCallback, useEffect } from "react";
+import { MapPin, Clock, ChevronRight, CalendarCheck } from "lucide-react";
+import { GoogleMapsIcon } from "@/components/icons/google-maps-icon";
 import { cn } from "@/lib/utils";
+import { buildGoogleMapsPlaceUrl } from "@/types/backend";
+import { useLang } from "@/lib/i18n/context";
+import type { BookingClickPayload, FeedSpot } from "@/types/backend";
 
-// ── Google Maps pin SVG icon ──────────────────────────────────────────────────
-function GoogleMapsIcon() {
-  return (
-    <svg viewBox="0 0 40 40" className="size-8 shrink-0" aria-hidden>
-      <circle cx="20" cy="20" r="20" fill="white" />
-      <path
-        fill="#EA4335"
-        d="M20 8c-5.52 0-10 4.48-10 10 0 7.5 10 18 10 18s10-10.5 10-18c0-5.52-4.48-10-10-10z"
-      />
-      <circle cx="20" cy="18" r="3.5" fill="#B31412" />
-    </svg>
+function HoursTable({
+  descriptions,
+  t,
+}: {
+  descriptions: string[];
+  t: (key: string) => string;
+}) {
+  const lines = descriptions.filter(
+    (line) => line.trim() && line !== "Hours not available",
   );
-}
 
-// ── Star rating renderer ──────────────────────────────────────────────────────
-function StarRating({ rating }: { rating: number }) {
-  return (
-    <span className="flex items-center gap-0.5" aria-label={`${rating} stars`}>
-      {Array.from({ length: 5 }).map((_, i) => {
-        const filled = i < Math.floor(rating);
-        const half = !filled && i < rating;
-        return (
-          <svg
-            key={i}
-            viewBox="0 0 12 12"
-            className="size-3"
-            aria-hidden
-          >
-            {half ? (
-              <>
-                <defs>
-                  <linearGradient id={`half-${i}`}>
-                    <stop offset="50%" stopColor="#ffb800" />
-                    <stop offset="50%" stopColor="#4b4540" />
-                  </linearGradient>
-                </defs>
-                <path
-                  fill={`url(#half-${i})`}
-                  d="M6 1l1.4 2.9 3.2.5-2.3 2.2.5 3.2L6 8.3l-2.8 1.5.5-3.2L1.4 4.4l3.2-.5z"
-                />
-              </>
-            ) : (
-              <path
-                fill={filled ? "#ffb800" : "#4b4540"}
-                d="M6 1l1.4 2.9 3.2.5-2.3 2.2.5 3.2L6 8.3l-2.8 1.5.5-3.2L1.4 4.4l3.2-.5z"
-              />
-            )}
-          </svg>
-        );
-      })}
-    </span>
-  );
-}
-
-// ── Review card ───────────────────────────────────────────────────────────────
-function ReviewCard({ review }: { review: (typeof MOCK_SPOT.reviews)[number] }) {
-  const [liked, setLiked] = useState(false);
-
-  const daysLabel =
-    review.daysAgo === 7 ? "1 week ago" : `${review.daysAgo} days ago`;
-
-  return (
-    <div className="flex gap-3 border-b border-white/6 pb-4 last:border-none last:pb-0">
-      {/* Avatar */}
-      <div className="relative size-9 shrink-0 overflow-hidden rounded-full ring-1 ring-white/10">
-        <Image
-          src={review.avatarSrc}
-          alt={review.username}
-          fill
-          sizes="36px"
-          className="object-cover object-center"
-        />
-      </div>
-
-      {/* Content */}
-      <div className="min-w-0 flex-1">
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <p className="text-[13px] font-bold text-text-primary">
-              {review.username}
-            </p>
-            <div className="mt-0.5 flex items-center gap-1.5">
-              <StarRating rating={review.rating} />
-              <span className="text-[11px] text-text-muted">{review.rating.toFixed(1)}</span>
-              <span className="text-[11px] text-stealth">· {daysLabel}</span>
-            </div>
-          </div>
-
-          {/* Like button */}
-          <button
-            type="button"
-            aria-label={liked ? "Unlike" : "Like review"}
-            onClick={() => setLiked((v) => !v)}
-            className="mt-0.5 shrink-0 transition-transform active:scale-90"
-          >
-            <Heart
-              className={cn(
-                "size-4 transition-colors",
-                liked
-                  ? "fill-electric-chilli stroke-electric-chilli"
-                  : "stroke-stealth",
-              )}
-            />
-          </button>
-        </div>
-
-        <p className="mt-1.5 text-[12px] leading-relaxed text-text-muted">
-          {review.text}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ── Hours table ───────────────────────────────────────────────────────────────
-function HoursTable() {
-  const today = new Date().toLocaleDateString("en-US", { weekday: "long" });
+  if (lines.length === 0) {
+    return (
+      <p className="mt-2 text-[12px] text-text-muted">
+        {t("moreInfo.hoursNotAvailable")}
+      </p>
+    );
+  }
 
   return (
     <div className="mt-2 space-y-1.5">
-      {MOCK_SPOT.weeklyHours.map((row) => {
-        const isToday = row.day === today;
-        return (
-          <div
-            key={row.day}
-            className={cn(
-              "grid grid-cols-[96px_1fr_1fr] gap-x-2 text-[12px]",
-              isToday ? "font-semibold" : "font-normal",
-            )}
-          >
-            <span className={isToday ? "text-text-primary" : "text-text-muted"}>
-              {row.day}
-            </span>
-            <span className="text-text-muted">{row.lunch}</span>
-            <span className="text-electric-chilli">{row.dinner}</span>
-          </div>
-        );
-      })}
+      {lines.map((line) => (
+        <p key={line} className="text-[12px] text-text-muted">
+          {line}
+        </p>
+      ))}
     </div>
   );
 }
 
-// ── Main More Info Panel ──────────────────────────────────────────────────────
 interface MoreInfoPanelProps {
   isOpen: boolean;
   onClose: () => void;
+  spot: FeedSpot;
+  accessToken?: string | null;
 }
 
-export function MoreInfoPanel({ isOpen, onClose }: MoreInfoPanelProps) {
-  // Lock body scroll when panel is open
+export function MoreInfoPanel({
+  isOpen,
+  onClose,
+  spot,
+  accessToken,
+}: MoreInfoPanelProps) {
+  const mapsUrl = buildGoogleMapsPlaceUrl(spot.spotId, spot.name);
+  const { t } = useLang();
+
   useEffect(() => {
     document.body.style.overflow = isOpen ? "hidden" : "";
     return () => {
@@ -163,125 +61,178 @@ export function MoreInfoPanel({ isOpen, onClose }: MoreInfoPanelProps) {
     };
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isOpen, onClose]);
+
+  const handleBookingClick = useCallback(() => {
+    if (!spot.bookingUrl) return;
+
+    const tier: BookingClickPayload["tier"] = spot.bookingUrl.includes(
+      "valuecommerce",
+    )
+      ? 1
+      : spot.bookingUrl.includes("google.com/maps")
+        ? 3
+        : 2;
+
+    const payload: BookingClickPayload = {
+      spotId: spot.spotId,
+      bookingUrl: spot.bookingUrl,
+      tier,
+    };
+    const headers: HeadersInit = { "Content-Type": "application/json" };
+    if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+    fetch("/api/analytics/booking-click", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+
+    window.open(spot.bookingUrl, "_blank", "noopener,noreferrer");
+  }, [spot.bookingUrl, spot.spotId, accessToken]);
+
   return (
     <>
-      {/* Backdrop — taps outside the panel close it */}
       <div
         aria-hidden
         onClick={onClose}
         className={cn(
           "absolute inset-0 z-20 bg-black/60 backdrop-blur-[2px] transition-opacity duration-300",
-          isOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
+          isOpen
+            ? "opacity-100 pointer-events-auto"
+            : "opacity-0 pointer-events-none",
         )}
       />
 
-      {/* Slide-up sheet */}
       <div
         role="dialog"
         aria-modal
-        aria-label="Restaurant details"
+        aria-label={t("moreInfo.ariaLabel")}
         className={cn(
-          // Stretch from near the top of the card down to the bottom
           "absolute inset-x-0 bottom-0 top-12 z-30 flex flex-col rounded-t-[28px] bg-surface shadow-[0_-8px_40px_rgba(0,0,0,0.6)]",
-          // Slide animation
           "transition-transform duration-400 ease-[cubic-bezier(0.32,0.72,0,1)]",
           isOpen ? "translate-y-0" : "translate-y-full",
         )}
       >
-        {/* Drag handle */}
         <div className="flex shrink-0 justify-center pt-3 pb-1">
           <div className="h-1 w-10 rounded-full bg-white/20" />
         </div>
 
-        {/* Scrollable content */}
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-8 pt-2">
-
-          {/* ── Store name + status ── */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-6 pt-2">
           <div className="mb-4">
             <h2 className="text-[1.6rem] font-black uppercase leading-[1.05] tracking-[-0.02em] text-text-primary">
-              {MOCK_SPOT.name}
+              {spot.name}
             </h2>
             <p className="mt-1.5 flex items-center gap-2 text-[13px]">
-              <span className="flex items-center gap-1 text-basil font-semibold">
-                <span className="size-2 rounded-full bg-basil inline-block" />
-                Open until {MOCK_SPOT.todayClose}
-              </span>
+              {spot.isOpen ? (
+                <span className="flex items-center gap-1 font-semibold text-basil">
+                  <span className="inline-block size-2 rounded-full bg-basil" />
+                  {spot.todayClose
+                    ? t("moreInfo.openUntil").replace("{time}", spot.todayClose)
+                    : t("moreInfo.openNow")}
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 font-semibold text-text-muted">
+                  <span className="inline-block size-2 rounded-full bg-text-muted" />
+                  {t("moreInfo.closed")}
+                </span>
+              )}
               <span className="text-text-muted/40">·</span>
-              <span className="text-text-muted">{MOCK_SPOT.category}</span>
+              <span className="text-text-muted">{spot.category}</span>
             </p>
           </div>
 
-          {/* ── Google Maps CTA ── */}
+          {spot.bookingUrl && (
+            <button
+              type="button"
+              onClick={handleBookingClick}
+              className="mb-3 flex w-full items-center gap-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-3.5 shadow-[0_6px_24px_rgba(16,185,129,0.35)] transition-transform active:scale-[0.98] hover:shadow-[0_8px_28px_rgba(16,185,129,0.5)]"
+            >
+              <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-white/20">
+                <CalendarCheck className="size-5 text-white" />
+              </div>
+              <div className="min-w-0 flex-1 text-left">
+                <p className="text-[15px] font-bold leading-tight text-white">
+                  {t("moreInfo.bookTable")}
+                </p>
+                <p className="text-xs font-medium text-white/75">
+                  {spot.bookingUrl.includes("valuecommerce")
+                    ? t("moreInfo.hotpepper")
+                    : t("moreInfo.onlineReservation")}
+                </p>
+              </div>
+              <ChevronRight className="size-5 shrink-0 text-white" />
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() =>
-              window.open(
-                `https://maps.google.com/?q=${encodeURIComponent(MOCK_SPOT.name)}`,
-                "_blank",
-              )
+              window.open(mapsUrl, "_blank", "noopener,noreferrer")
             }
             className="mb-5 flex w-full items-center gap-3 rounded-2xl bg-gradient-to-r from-electric-chilli to-chilli-bright px-4 py-3.5 shadow-[0_6px_24px_rgba(224,62,0,0.4)] transition-transform active:scale-[0.98] hover:shadow-[0_8px_28px_rgba(224,62,0,0.55)]"
           >
             <GoogleMapsIcon />
             <div className="min-w-0 flex-1 text-left">
               <p className="text-[15px] font-bold leading-tight text-text-primary">
-                Open in Google Maps
+                {t("moreInfo.openInMaps")}
               </p>
               <p className="text-xs font-medium text-text-primary/75">
-                Get directions
+                {t("moreInfo.getDirections")}
               </p>
             </div>
             <ChevronRight className="size-5 shrink-0 text-text-primary" />
           </button>
 
-          {/* ── Reviews section ── */}
-          <div className="mb-5">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-[15px] font-black text-text-primary">
-                Top Reviews
-              </h3>
-              <button
-                type="button"
-                className="text-[12px] font-semibold text-electric-chilli"
-              >
-                See All
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {MOCK_SPOT.reviews.map((review) => (
-                <ReviewCard key={review.id} review={review} />
-              ))}
-            </div>
+          <div className="mb-5 rounded-xl border border-white/6 bg-surface-raised px-4 py-3">
+            <h3 className="text-[15px] font-black text-text-primary">
+              {t("moreInfo.googleRating")}
+            </h3>
+            {spot.rating !== null ? (
+              <p className="mt-1.5 text-[13px] text-text-muted">
+                <span className="text-honey">⭐ {spot.rating}</span>
+                {spot.reviewCount !== null && (
+                  <span>
+                    {" "}
+                    · {spot.reviewCount} {t("moreInfo.reviews")}
+                  </span>
+                )}
+              </p>
+            ) : (
+              <p className="mt-1.5 text-[12px] text-text-muted">
+                {t("moreInfo.noRating")}
+              </p>
+            )}
           </div>
 
-          {/* ── Basic Info section ── */}
-          <div>
+          <div className="pb-4">
             <h3 className="mb-3 text-[15px] font-black text-text-primary">
-              Basic Info
+              {t("moreInfo.basicInfo")}
             </h3>
 
-            {/* Address row */}
-            <button
-              type="button"
-              className="flex w-full items-center gap-3 rounded-xl border border-white/6 bg-surface-raised px-4 py-3 transition-colors hover:bg-white/5 active:bg-white/8"
-            >
-              <MapPin className="size-4 shrink-0 text-stealth" />
-              <span className="flex-1 text-left text-[13px] text-text-muted">
-                {MOCK_SPOT.address}
-              </span>
-              <ChevronRight className="size-4 shrink-0 text-stealth" />
-            </button>
+            {spot.address && (
+              <div className="flex w-full items-start gap-3 rounded-xl border border-white/6 bg-surface-raised px-4 py-3">
+                <MapPin className="mt-0.5 size-4 shrink-0 text-stealth" />
+                <span className="flex-1 text-left text-[13px] leading-relaxed text-text-muted">
+                  {spot.address}
+                </span>
+              </div>
+            )}
 
-            {/* Business hours — always visible */}
             <div className="mt-1.5 rounded-xl border border-white/6 bg-surface-raised px-4 py-3">
               <div className="flex items-center gap-3">
                 <Clock className="size-4 shrink-0 text-stealth" />
                 <span className="flex-1 text-left text-[13px] font-medium text-text-muted">
-                  Business hours
+                  {t("moreInfo.businessHours")}
                 </span>
               </div>
-              <HoursTable />
+              <HoursTable descriptions={spot.weekdayDescriptions} t={t} />
             </div>
           </div>
         </div>
