@@ -14,7 +14,10 @@ import { useSwipeFeed } from "@/lib/hooks/use-swipe-feed";
 import { useAuth } from "@/lib/hooks/use-auth";
 import { useLocation } from "@/lib/hooks/use-location";
 import { useFreeSwipeQuota } from "@/lib/hooks/use-free-swipe-quota";
+import { buildLoginPath } from "@/lib/auth/safe-redirect";
 import { EXPLORE_THEMES } from "@/lib/explore-mock";
+import { useLang } from "@/lib/i18n/context";
+import { translations } from "@/lib/i18n/translations";
 import {
   feedItemKey,
   isFeedNativeAd,
@@ -34,6 +37,7 @@ export function SwipeScreen() {
   const { accessToken, isLoading: authLoading, session } = useAuth();
   const { coords, status, setManualCoords } = useLocation();
   const { used, limit, isLimitReached, consume } = useFreeSwipeQuota();
+  const { t, lang } = useLang();
   const [locationLabel, setLocationLabel] = useState<string | null>(
     labelParam ?? null,
   );
@@ -43,27 +47,28 @@ export function SwipeScreen() {
 
   const themeName = useMemo(() => {
     if (!themeId) return null;
-    return EXPLORE_THEMES.find((t) => t.id === themeId)?.name ?? null;
-  }, [themeId]);
+    const theme = EXPLORE_THEMES.find((t) => t.id === themeId);
+    if (!theme) return null;
+    return translations[lang].explore.themes[themeId]?.name ?? theme.name;
+  }, [themeId, lang]);
 
-  // Apply URL-provided coords when GPS is denied (e.g. user picked location in Explore)
+  // Apply Explore / URL coords whenever present (not only when GPS is denied).
   const urlCoordsApplied = useRef(false);
   useEffect(() => {
     if (urlCoordsApplied.current) return;
-    if (status !== "denied" && status !== "unsupported") return;
     if (!latParam || !lngParam) return;
     const lat = parseFloat(latParam);
     const lng = parseFloat(lngParam);
     if (isNaN(lat) || isNaN(lng)) return;
     urlCoordsApplied.current = true;
     setManualCoords({ lat, lng });
-  }, [status, latParam, lngParam, setManualCoords]);
+  }, [latParam, lngParam, setManualCoords]);
 
   useEffect(() => {
     if (!isThemedSwipe || authLoading) return;
     if (!session) {
       const redirect = `/?${searchParams.toString()}`;
-      router.replace(`/login?redirect=${encodeURIComponent(redirect)}`);
+      router.replace(buildLoginPath(redirect));
     }
   }, [isThemedSwipe, authLoading, session, router, searchParams]);
 
@@ -90,7 +95,6 @@ export function SwipeScreen() {
 
   const handleSwipe = (action: SwipeAction) => {
     if (!currentItem) return;
-    // Ads don't consume the free-tier quota
     if (!isFeedNativeAd(currentItem)) {
       if (isLimitReached) return;
       consume();
@@ -144,7 +148,7 @@ export function SwipeScreen() {
     currentItem;
 
   const displayLocation =
-    locationLabel ?? (status === "ready" ? "Near you" : null);
+    locationLabel ?? (status === "ready" ? t("swipe.nearYou") : null);
   const nearLimit = used >= limit - 5 && used < limit;
 
   return (
@@ -152,11 +156,12 @@ export function SwipeScreen() {
       <main className="flex min-h-0 flex-1 flex-col px-4 pb-28 pt-6">
         <header className="mb-4 flex shrink-0 flex-col items-center">
           <h1 className="text-sm font-bold tracking-[0.18em] text-electric-chilli drop-shadow-[0_0_8px_rgba(224,62,0,0.25)]">
-            🔥 SWIPE
+            🔥 {t("nav.swipe")}
           </h1>
           {themeName && (
             <p className="mt-1.5 text-[11px] font-medium text-text-muted">
-              Theme: <span className="text-text-primary">{themeName}</span>
+              {t("swipe.theme")}:{" "}
+              <span className="text-text-primary">{themeName}</span>
             </p>
           )}
           {displayLocation && !showLimitGate && (
@@ -167,7 +172,7 @@ export function SwipeScreen() {
             >
               📍 {displayLocation}
               <span className="ml-1 text-text-muted/70 underline underline-offset-2">
-                Change
+                {t("swipe.change")}
               </span>
             </button>
           )}
@@ -189,7 +194,7 @@ export function SwipeScreen() {
         {showAuthGate && (
           <div className="flex flex-1 items-center justify-center">
             <p className="animate-pulse text-sm text-text-muted">
-              Checking sign-in…
+              {t("swipe.checkingSignIn")}
             </p>
           </div>
         )}
@@ -197,20 +202,19 @@ export function SwipeScreen() {
         {showLimitGate && (
           <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
             <p className="text-sm font-bold tracking-[0.14em] text-electric-chilli">
-              FREE LIMIT
+              {t("swipe.freeLimit")}
             </p>
             <h2 className="mt-3 text-xl font-black text-text-primary">
-              You&apos;ve used all {limit} free swipes
+              {t("swipe.usedAllSwipes", { limit })}
             </h2>
             <p className="mt-2.5 max-w-[260px] text-sm leading-relaxed text-text-muted">
-              Upgrade to Pro for unlimited swipes. The free limit is absolute —
-              changing areas does not give you more.
+              {t("swipe.upgradeDesc")}
             </p>
             <Link
               href="/pro"
               className="mt-8 flex h-12 w-full max-w-[240px] items-center justify-center rounded-xl bg-electric-chilli text-sm font-bold text-text-primary shadow-[0_4px_20px_rgba(224,62,0,0.35)] transition-all active:scale-[0.98] hover:shadow-[0_6px_28px_rgba(224,62,0,0.5)]"
             >
-              Go Pro
+              {t("swipe.goPro")}
             </Link>
           </div>
         )}
@@ -227,14 +231,16 @@ export function SwipeScreen() {
             onClick={() => setPickingLocation(false)}
             className="mt-3 text-center text-[12px] text-text-muted underline underline-offset-2"
           >
-            Cancel
+            {t("swipe.cancel")}
           </button>
         )}
 
         {showFullScreenLoading && (
           <div className="flex flex-1 items-center justify-center">
             <p className="animate-pulse text-sm text-text-muted">
-              {showLocating ? "Finding your location…" : "Loading spots…"}
+              {showLocating
+                ? t("swipe.findingLocation")
+                : t("swipe.loadingSpots")}
             </p>
           </div>
         )}
@@ -242,7 +248,7 @@ export function SwipeScreen() {
         {showError && (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
             <p className="text-sm font-semibold text-text-primary">
-              Could not load spots
+              {t("swipe.couldNotLoad")}
             </p>
             <p className="text-xs leading-relaxed text-text-muted">{error}</p>
             <button
@@ -250,7 +256,7 @@ export function SwipeScreen() {
               onClick={() => setPickingLocation(true)}
               className="mt-2 flex h-11 w-full max-w-[240px] items-center justify-center rounded-xl bg-electric-chilli text-sm font-bold text-text-primary shadow-[0_4px_16px_rgba(224,62,0,0.35)] transition-transform active:scale-[0.98]"
             >
-              Search another area
+              {t("swipe.searchAnotherArea")}
             </button>
           </div>
         )}
@@ -258,17 +264,17 @@ export function SwipeScreen() {
         {showEmpty && (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
             <p className="text-sm font-semibold text-text-primary">
-              No spots found nearby
+              {t("swipe.noSpotsFound")}
             </p>
             <p className="max-w-[260px] text-xs leading-relaxed text-text-muted">
-              Try a different city or neighborhood — great for travel mode.
+              {t("swipe.noSpotsDesc")}
             </p>
             <button
               type="button"
               onClick={() => setPickingLocation(true)}
               className="mt-2 flex h-11 w-full max-w-[240px] items-center justify-center rounded-xl bg-electric-chilli text-sm font-bold text-text-primary shadow-[0_4px_16px_rgba(224,62,0,0.35)] transition-transform active:scale-[0.98]"
             >
-              Search another area
+              {t("swipe.searchAnotherArea")}
             </button>
           </div>
         )}
@@ -277,13 +283,12 @@ export function SwipeScreen() {
           <section className="flex min-h-0 flex-1 flex-col pb-2">
             {isRefetching && (
               <p className="mb-2 text-center text-[10px] font-medium tracking-wide text-text-muted/70">
-                Loading more spots…
+                {t("swipe.loadingMore")}
               </p>
             )}
             {isThemedSwipe && isSparseTheme && !isRefetching && (
               <p className="mb-2 text-center text-[10px] font-medium text-text-muted/60">
-                ⚡ Limited themed spots nearby — showing top-rated alternatives
-                too
+                {t("swipe.sparseTheme")}
               </p>
             )}
             <div className="relative flex min-h-0 flex-1 flex-col">
@@ -321,7 +326,7 @@ export function SwipeScreen() {
                 href="/login?redirect=/"
                 className="mt-3 flex items-center justify-center gap-1.5 text-[11px] text-stealth transition-colors hover:text-text-muted"
               >
-                <span>Sign in to save your likes →</span>
+                <span>{t("swipe.signInToSave")}</span>
               </Link>
             )}
           </section>

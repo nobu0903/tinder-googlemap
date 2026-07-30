@@ -7,6 +7,7 @@ import {
   type Municipality,
   type Prefecture,
 } from "@/lib/japan-locations";
+import { useLang } from "@/lib/i18n/context";
 import type { Coordinates } from "@/lib/hooks/use-location";
 
 interface LocationPickerProps {
@@ -14,7 +15,10 @@ interface LocationPickerProps {
 }
 
 export function LocationPicker({ onConfirm }: LocationPickerProps) {
-  const [prefectureId, setPrefectureId] = useState(JAPAN_PREFECTURES[0]?.id ?? "");
+  const { t } = useLang();
+  const [prefectureId, setPrefectureId] = useState(
+    JAPAN_PREFECTURES[0]?.id ?? "",
+  );
   const [municipalityId, setMunicipalityId] = useState("");
 
   const prefecture = useMemo(
@@ -54,16 +58,18 @@ export function LocationPicker({ onConfirm }: LocationPickerProps) {
         <div className="mb-4 flex items-center gap-2">
           <MapPin className="size-5 text-electric-chilli" />
           <div>
-            <p className="text-sm font-bold text-text-primary">Choose your area</p>
+            <p className="text-sm font-bold text-text-primary">
+              {t("location.chooseArea")}
+            </p>
             <p className="text-[11px] text-text-muted">
-              Location access is off. Pick a prefecture and city.
+              {t("location.locationOff")}
             </p>
           </div>
         </div>
 
         <label className="mb-3 block">
           <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-text-muted">
-            Prefecture
+            {t("location.prefecture")}
           </span>
           <select
             value={prefectureId}
@@ -80,7 +86,7 @@ export function LocationPicker({ onConfirm }: LocationPickerProps) {
 
         <label className="mb-5 block">
           <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-text-muted">
-            City / Area
+            {t("location.cityArea")}
           </span>
           <select
             value={municipalityId || municipalities[0]?.id || ""}
@@ -100,7 +106,7 @@ export function LocationPicker({ onConfirm }: LocationPickerProps) {
           onClick={handleConfirm}
           className="h-11 w-full rounded-xl bg-electric-chilli text-sm font-bold text-text-primary shadow-[0_4px_16px_rgba(224,62,0,0.35)] transition-transform active:scale-[0.98]"
         >
-          Use this location
+          {t("location.useThis")}
         </button>
       </div>
     </div>

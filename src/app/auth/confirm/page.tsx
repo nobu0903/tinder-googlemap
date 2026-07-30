@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { supabase } from "@/lib/supabase/client";
+import { safeInternalRedirect } from "@/lib/auth/safe-redirect";
 
 function ConfirmContent() {
   const router = useRouter();
@@ -16,7 +17,7 @@ function ConfirmContent() {
     ran.current = true;
 
     const code = params.get("code");
-    const next = params.get("next") ?? "/";
+    const next = safeInternalRedirect(params.get("next"), "/");
 
     if (!code) {
       router.replace("/login?error=confirmation_failed");

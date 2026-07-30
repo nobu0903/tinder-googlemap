@@ -81,81 +81,32 @@ interface PhotoSlotProps {
 
 
 function PhotoSlot({ photo, priority = false }: PhotoSlotProps) {
-
-  const [loaded, setLoaded] = useState(false);
-
-
-
-  useEffect(() => {
-
-    setLoaded(false);
-
-  }, [photo?.url]);
-
-
-
+  // Skeleton stays behind the image — never gate the <Image> on onLoad.
+  // Cached Next/Image responses often skip a late onLoad; opacity-0 then stuck forever.
   if (!photo?.url) {
-
     return (
-
       <div className="flex h-full items-center justify-center text-sm text-text-muted">
-
         No photo available
-
       </div>
-
     );
-
   }
 
-
-
   return (
-
     <>
-
       <div
-
         aria-hidden
-
-        className={cn(
-
-          "absolute inset-0 animate-pulse bg-surface-raised transition-opacity duration-300",
-
-          loaded ? "opacity-0" : "opacity-100",
-
-        )}
-
+        className="absolute inset-0 animate-pulse bg-surface-raised"
       />
-
       <Image
-
         src={photo.url}
-
         alt={photo.alt}
-
         fill
-
         priority={priority}
-
         sizes="(max-width: 400px) 100vw, 400px"
-
-        onLoad={() => setLoaded(true)}
-
-        className={cn(
-
-          "object-cover object-center transition-opacity duration-300",
-
-          loaded ? "opacity-100" : "opacity-0",
-
-        )}
-
+        className="object-cover object-center"
       />
-
     </>
-
   );
-
 }
 
 
@@ -189,11 +140,11 @@ function PhotoPageLayer({ page, isActive, priority = false }: PhotoPageLayerProp
       aria-hidden={!isActive}
 
       className={cn(
-
         "absolute inset-0 flex flex-col",
-
-        isActive ? "z-10 visible" : "z-0 invisible pointer-events-none",
-
+        // Prefer opacity over visibility:hidden so lazy Next/Image still loads
+        isActive
+          ? "z-10 opacity-100"
+          : "z-0 opacity-0 pointer-events-none",
       )}
 
     >
@@ -433,7 +384,7 @@ export function SwipeCard({
 
                 isActive={idx === pageIndex}
 
-                priority={idx === 0}
+                priority={idx === pageIndex || idx === 0}
 
               />
 

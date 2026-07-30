@@ -5,13 +5,38 @@ import type {
   FeedSpot,
   SpotPhoto,
   FeedPhotoPage,
+  OpeningHoursPeriod,
 } from "@/types/backend";
 import { MAX_STORED_PHOTOS } from "@/types/backend";
+import { stripHoursUnavailableStub } from "@/lib/places/enrichment-gate";
+import { toClientPhotoUrl } from "@/lib/places/photo-url";
 
-/** Maps price_level (0–4) to a ¥ string. */
+/** Japan product — Google periods are local wall times; evaluate in Tokyo. */
+export const FEED_TIMEZONE = "Asia/Tokyo";
+
+const WEEKDAY_TO_DAY: Record<string, number> = {
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+};
+
+/** Maps price_level (0–4) to a ¥ string. Free (0) is explicit. */
 export function formatPriceLabel(level: number | null): string {
   if (level === null) return "";
+  if (level === 0) return "Free";
   return "¥".repeat(Math.min(Math.max(level, 1), 4));
+}
+
+/** Human-readable Google primary type, e.g. "coffee_shop" → "Coffee Shop". */
+export function formatPrimaryType(raw: string | null | undefined): string {
+  if (!raw) return "Restaurant";
+  return raw
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 /**
@@ -35,36 +60,66 @@ export function haversineKm(
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+/** Weekday (0=Sun) + minutes-since-midnight in the given IANA timezone. */
+export function getZonedDayAndMinutes(
+  date: Date,
+  timeZone: string = FEED_TIMEZONE,
+): { day: number; mins: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+    hour: "numeric",
+    minute: "numeric",
+    hourCycle: "h23",
+  }).formatToParts(date);
+
+  const weekday = parts.find((p) => p.type === "weekday")?.value ?? "Sun";
+  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
+  const minute = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+
+  return {
+    day: WEEKDAY_TO_DAY[weekday] ?? 0,
+    mins: hour * 60 + minute,
+  };
+}
+
+function formatCloseTime(close: { hour: number; minute: number }): string {
+  const h = String(close.hour).padStart(2, "0");
+  const m = String(close.minute).padStart(2, "0");
+  return `${h}:${m}`;
+}
+
 /**
  * Calculates whether a spot is open RIGHT NOW from the stored `periods` array.
- *
- * This replaces the stored `openNow` snapshot (which reflects the state at ingest
- * time and becomes stale with a 7-day cooldown). Using `periods` gives accurate
- * real-time open/closed status without any additional API calls.
- *
- * Handles:
- *  - Same-day periods (e.g. Mon 11:00–22:00)
- *  - Midnight-spanning periods (e.g. Fri 22:00 → Sat 02:00)
- *  - 24-hour places (open.hour === close.hour === 0 on the same day)
- *
- * Returns false when opening_hours data is unavailable.
+ * Uses Asia/Tokyo (not the server process TZ).
  */
-function isOpenNow(row: SpotRow): boolean {
+export function isOpenNow(
+  row: SpotRow,
+  now: Date = new Date(),
+  timeZone: string = FEED_TIMEZONE,
+): boolean {
   const periods = row.opening_hours?.periods;
   if (!periods || periods.length === 0) return false;
 
-  const now = new Date();
-  const currentDay = now.getDay();                              // 0 = Sun … 6 = Sat
-  const currentMins = now.getHours() * 60 + now.getMinutes();
+  const { day: currentDay, mins: currentMins } = getZonedDayAndMinutes(
+    now,
+    timeZone,
+  );
 
   for (const p of periods) {
+    if (!p.open) continue;
     const openMins = p.open.hour * 60 + p.open.minute;
+
+    // Google may omit close for some always-open / incomplete encodings
+    if (!p.close) {
+      if (currentDay === p.open.day && currentMins >= openMins) return true;
+      continue;
+    }
+
     const closeMins = p.close.hour * 60 + p.close.minute;
 
     if (p.open.day === p.close.day) {
-      // 24-hour place (Google encodes as open 0:00 → close 0:00 same day)
       if (openMins === 0 && closeMins === 0) return true;
-      // Normal same-day period
       if (
         currentDay === p.open.day &&
         currentMins >= openMins &&
@@ -73,7 +128,6 @@ function isOpenNow(row: SpotRow): boolean {
         return true;
       }
     } else {
-      // Midnight-spanning (e.g. Fri 22:00 → Sat 02:00)
       if (currentDay === p.open.day && currentMins >= openMins) return true;
       if (currentDay === p.close.day && currentMins < closeMins) return true;
     }
@@ -82,18 +136,70 @@ function isOpenNow(row: SpotRow): boolean {
   return false;
 }
 
-/** Determine today's closing time string, e.g. "22:00", from opening_hours. */
-function getTodayClose(row: SpotRow): string | null {
+/**
+ * Closing time for the period that is active now, or that opens today.
+ * Handles overnight periods that opened yesterday.
+ */
+export function getTodayClose(
+  row: SpotRow,
+  now: Date = new Date(),
+  timeZone: string = FEED_TIMEZONE,
+): string | null {
   const periods = row.opening_hours?.periods;
-  if (!periods) return null;
+  if (!periods?.length) return null;
 
-  const todayDay = new Date().getDay();
-  const period = periods.find((p) => p.open.day === todayDay);
-  if (!period) return null;
+  const { day: todayDay, mins: currentMins } = getZonedDayAndMinutes(
+    now,
+    timeZone,
+  );
+  const yesterday = (todayDay + 6) % 7;
 
-  const h = String(period.close.hour).padStart(2, "0");
-  const m = String(period.close.minute).padStart(2, "0");
-  return `${h}:${m}`;
+  const active = findActivePeriod(periods, todayDay, currentMins);
+  if (active?.close) return formatCloseTime(active.close);
+
+  const opensToday = periods.find(
+    (p) => p.open?.day === todayDay && p.close,
+  );
+  if (opensToday?.close) return formatCloseTime(opensToday.close);
+
+  const overnight = periods.find(
+    (p) =>
+      p.open?.day === yesterday &&
+      p.close &&
+      p.close.day === todayDay,
+  );
+  if (overnight?.close) return formatCloseTime(overnight.close);
+
+  return null;
+}
+
+function findActivePeriod(
+  periods: OpeningHoursPeriod[],
+  currentDay: number,
+  currentMins: number,
+): OpeningHoursPeriod | null {
+  for (const p of periods) {
+    if (!p.open || !p.close) continue;
+    const openMins = p.open.hour * 60 + p.open.minute;
+    const closeMins = p.close.hour * 60 + p.close.minute;
+
+    if (p.open.day === p.close.day) {
+      if (openMins === 0 && closeMins === 0 && currentDay === p.open.day) {
+        return p;
+      }
+      if (
+        currentDay === p.open.day &&
+        currentMins >= openMins &&
+        currentMins < closeMins
+      ) {
+        return p;
+      }
+    } else {
+      if (currentDay === p.open.day && currentMins >= openMins) return p;
+      if (currentDay === p.close.day && currentMins < closeMins) return p;
+    }
+  }
+  return null;
 }
 
 function isPortrait(photo: SpotPhoto): boolean {
@@ -106,13 +212,13 @@ function isLandscape(photo: SpotPhoto): boolean {
 
 function toPhotoMeta(photo: SpotPhoto, row: SpotRow, index: number) {
   return {
-    url: photo.url,
+    url: toClientPhotoUrl(photo.url),
     alt: `${row.name} photo ${index + 1}`,
   };
 }
 
 /**
- * Build browsable photo pages from up to 10 stored photos.
+ * Build browsable photo pages from stored photos (capped by MAX_STORED_PHOTOS).
  * Portrait → SINGLE_FULL (1 photo). Landscape → pair into DUAL_STACK (2 photos).
  */
 export function buildPhotoPages(
@@ -171,7 +277,7 @@ export function buildPhotoPages(
   return pages;
 }
 
-/** Map a `SpotRow` + user coordinates into one `FeedSpot` (1 card, up to 10 photos). */
+/** Map a `SpotRow` + user coordinates into one `FeedSpot` (1 card, up to MAX_STORED_PHOTOS). */
 export function rowToFeedSpot(
   row: SpotRow,
   userLat: number,
@@ -180,6 +286,10 @@ export function rowToFeedSpot(
   const all = row.photos ?? [];
   const photoPages = buildPhotoPages(all, row);
   const firstPage = photoPages[0];
+  const hours = stripHoursUnavailableStub(row.opening_hours);
+  // Only affiliate resolve markers — not opening hours (Admin may fill hours first)
+  const bookingResolved =
+    row.booking_url != null || row.hotpepper_url != null;
 
   return {
     id: row.id,
@@ -195,13 +305,14 @@ export function rowToFeedSpot(
       Math.round(haversineKm(userLat, userLng, row.lat, row.lng) * 10) / 10,
     isOpen: isOpenNow(row),
     todayClose: getTodayClose(row),
-    category: row.vibe_tags.length > 0 ? row.vibe_tags[0] : "Restaurant",
+    category: formatPrimaryType(row.primary_type),
     layoutType: firstPage?.layoutType ?? "SINGLE_FULL",
     photos: firstPage?.photos ?? [],
     vibeTags: row.vibe_tags,
     address: row.address,
-    weekdayDescriptions: row.opening_hours?.weekdayDescriptions ?? [],
+    weekdayDescriptions: hours?.weekdayDescriptions ?? [],
     bookingUrl: row.booking_url ?? null,
+    bookingResolved,
   };
 }
 

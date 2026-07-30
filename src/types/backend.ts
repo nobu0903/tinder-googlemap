@@ -13,7 +13,8 @@ export interface SpotPhoto {
 
 export interface OpeningHoursPeriod {
   open: { day: number; hour: number; minute: number };
-  close: { day: number; hour: number; minute: number };
+  /** Google may omit close for some always-open / incomplete encodings */
+  close?: { day: number; hour: number; minute: number };
 }
 
 export interface OpeningHours {
@@ -67,13 +68,16 @@ export interface SwipeRow {
 
 /**
  * Photos fetched and stored per spot (Nearby + Place Details).
- * Kept at 3 to cap Google Place Photo API billing — each photo URL
- * displayed in the browser is a separate billed request ($0.007/photo).
+ * Cap display/storage at 5 — each photo URL hit in the browser is billed
+ * by Google Place Photo (~$0.007). Collection only needs a short carousel.
  */
-export const MAX_STORED_PHOTOS = 3;
+export const MAX_STORED_PHOTOS = 5;
 
 /** Skip Place Details when at least this many photos exist from search cache */
 export const MIN_PHOTOS_SKIP_DETAILS = 3;
+
+/** Collection list card image width (px) — cards are ~400 CSS px tall/wide */
+export const COLLECTION_CARD_PHOTO_WIDTH = 400;
 
 /** Max Place Details calls per production feed batch (0 = lazy client hydrate only) */
 export const PRODUCTION_MAX_DETAILS_PER_FEED = 0;
@@ -121,7 +125,7 @@ export interface FeedSpot {
   id: string;
   /** Google Place ID used for swipe actions and Maps deep links */
   spotId: string;
-  /** Number of source photos attached (up to 10) */
+  /** Number of source photos attached (up to MAX_STORED_PHOTOS) */
   photoCount: number;
   /** Pages browsable via tap left/right inside the card */
   photoPages: FeedPhotoPage[];
@@ -150,6 +154,11 @@ export interface FeedSpot {
    * null: only Google Maps fallback available — "Book" button is hidden
    */
   bookingUrl: string | null;
+  /**
+   * True after booking resolve ran (hotpepper_url set, even to "").
+   * Client uses this to skip redundant /api/spots/hydrate calls.
+   */
+  bookingResolved: boolean;
 }
 
 // ── Collection (liked spots) ──────────────────────────────────────────────────
