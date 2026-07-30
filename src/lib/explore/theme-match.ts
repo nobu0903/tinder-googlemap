@@ -53,7 +53,7 @@ function scoreSoftMatch(row: SpotRow, tag: string): number {
       return 0;
     }
     case "late-night": {
-      return tags.includes("late-night") ? 100 : 0;
+      return (row.vibe_tags ?? []).includes("late-night") ? 100 : 0;
     }
     default:
       return 0;
