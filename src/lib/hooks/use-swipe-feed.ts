@@ -10,6 +10,7 @@ import {
 } from "@/types/backend";
 import type { Coordinates } from "@/lib/hooks/use-location";
 import { feedSpotNeedsHydrate } from "@/lib/places/enrichment-gate";
+import { openCurrentNativeAd } from "@/lib/ads/native-ad-opener";
 
 /** Refetch only when the queue is fully exhausted */
 const REFETCH_WHEN_EMPTY = true;
@@ -285,6 +286,10 @@ export function useSwipeFeed({
       if (!item) return;
 
       if (isFeedNativeAd(item)) {
+        // Right swipe (like) → open advertiser via AdSense click forward
+        if (action === "like") {
+          openCurrentNativeAd();
+        }
         advance();
         return;
       }

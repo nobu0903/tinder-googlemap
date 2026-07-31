@@ -1,41 +1,39 @@
 import type { FeedNativeAd, FeedSpot, SwipeFeedItem } from "@/types/backend";
 
-export const NATIVE_AD_SLOT_ID = "ad-slot-google-admob";
+export const NATIVE_AD_SLOT_PREFIX = "ad-slot-";
+
+/** Insert one ad after every N spot cards */
+export const SPOTS_PER_AD = 3;
 
 const MAX_FEED_ITEMS = 20;
 
-/** Random index in [7, 11] for in-feed native ad placement */
-export function pickNativeAdIndex(): number {
-  return 7 + Math.floor(Math.random() * 5);
-}
-
-export function createNativeAdSlot(): FeedNativeAd {
+export function createNativeAdSlot(seq: number): FeedNativeAd {
   return {
-    id: NATIVE_AD_SLOT_ID,
+    id: `${NATIVE_AD_SLOT_PREFIX}${seq}`,
     layoutType: "AD_NATIVE",
     name: "Sponsored",
   };
 }
 
 /**
- * Inject a native ad slot into the production feed (max 20 items including ad).
- * Spots-only input is trimmed to 19 before insert when at capacity.
+ * Inject native ads into the production feed: 1 ad after every 3 spots.
+ * Caps total length at MAX_FEED_ITEMS (spots + ads).
  */
 export function injectNativeAd(spots: FeedSpot[]): SwipeFeedItem[] {
   if (spots.length === 0) return spots;
 
-  const ad = createNativeAdSlot();
-  const index = Math.min(pickNativeAdIndex(), spots.length);
-  const items: SwipeFeedItem[] = [...spots];
+  const items: SwipeFeedItem[] = [];
+  let adSeq = 0;
 
-  if (items.length >= MAX_FEED_ITEMS) {
-    items.pop();
-  }
+  for (let i = 0; i < spots.length; i++) {
+    if (items.length >= MAX_FEED_ITEMS) break;
+    items.push(spots[i]!);
 
-  items.splice(index, 0, ad);
-
-  if (items.length > MAX_FEED_ITEMS) {
-    items.length = MAX_FEED_ITEMS;
+    const shouldInsertAd = (i + 1) % SPOTS_PER_AD === 0;
+    if (shouldInsertAd && items.length < MAX_FEED_ITEMS) {
+      items.push(createNativeAdSlot(adSeq));
+      adSeq += 1;
+    }
   }
 
   return items;
