@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractPlacesPhotoName } from "@/lib/places/photo-url";
 import { SWIPE_CARD_PHOTO_WIDTH } from "@/types/backend";
+import { createIpRateLimiter, getClientIp } from "@/lib/api/rate-limit";
 
 const GOOGLE_PLACES_BASE = "https://places.googleapis.com/v1";
 const NAME_PATTERN = /^places\/[^/]+\/photos\/[^/]+$/;
@@ -9,12 +10,33 @@ const NAME_PATTERN = /^places\/[^/]+\/photos\/[^/]+$/;
 const PHOTO_CACHE_CONTROL =
   "public, max-age=2592000, immutable, stale-while-revalidate=604800";
 
+/** Cap unauthenticated photo proxy abuse (Places Photo billing). */
+const photoRateLimit = createIpRateLimiter({
+  windowMs: 60 * 60 * 1000,
+  maxPerWindow: 120,
+});
+
 /**
  * GET /api/photo?name=places%2F...%2Fphotos%2F...&maxWidthPx=480
  * Proxies Google Place Photo media with the server API key.
  * Streams the upstream body (no full-buffer wait) for faster TTFB.
  */
 export async function GET(req: NextRequest) {
+  const ip = getClientIp(req);
+  const rate = photoRateLimit.check(ip);
+  if (!rate.allowed) {
+    return NextResponse.json(
+      { error: "Too many photo requests. Try again later." },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(rate.retryAfterSec),
+          "X-RateLimit-Remaining": "0",
+        },
+      },
+    );
+  }
+
   const nameParam = req.nextUrl.searchParams.get("name");
   const widthRaw =
     req.nextUrl.searchParams.get("maxWidthPx") ?? String(SWIPE_CARD_PHOTO_WIDTH);
@@ -45,7 +67,6 @@ export async function GET(req: NextRequest) {
   try {
     const res = await fetch(upstream, {
       redirect: "follow",
-      // Cache at the edge/CDN; photos are immutable per resource name.
       next: { revalidate: 2592000 },
     });
 
@@ -68,6 +89,7 @@ export async function GET(req: NextRequest) {
       headers: {
         "Content-Type": contentType,
         "Cache-Control": PHOTO_CACHE_CONTROL,
+        "X-RateLimit-Remaining": String(rate.remaining),
       },
     });
   } catch (err) {

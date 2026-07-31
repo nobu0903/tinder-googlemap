@@ -688,19 +688,28 @@ function LpFooter() {
 
         <ul className="flex flex-wrap justify-center gap-x-8 gap-y-2 text-[11px] text-white/28">
           <li>
-            <span className="cursor-default" title="準備中">
+            <Link
+              href="/privacy"
+              className="transition-colors hover:text-white/55"
+            >
               プライバシーポリシー
-            </span>
+            </Link>
           </li>
           <li>
-            <span className="cursor-default" title="準備中">
+            <Link
+              href="/terms"
+              className="transition-colors hover:text-white/55"
+            >
               利用規約
-            </span>
+            </Link>
           </li>
           <li>
-            <span className="cursor-default" title="準備中">
+            <a
+              href="mailto:kareta09badominton@gmail.com"
+              className="transition-colors hover:text-white/55"
+            >
               お問い合わせ
-            </span>
+            </a>
           </li>
         </ul>
 
