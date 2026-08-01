@@ -1,0 +1,89 @@
+---
+description: Optimized Cache-First Backend Pipe, Place Details Hydration, and Native Place ID Maps Export for Swipe API
+globs: app/api/swipe/**/*.ts, lib/supabase/**/*.ts, lib/places/**/*.ts
+---
+
+# Efficient Swipe Backend & Caching Specification
+
+## 1. Hybrid Data Hydration Pipeline (Cost & Latency Optimization)
+To avoid Google Places API billing bleed, the backend must prioritize the Supabase local cache over live API calls.
+
+1. **Nearby Batch Fetch:** Call `searchNearby` ONLY when the local database contains fewer than 20 un-swiped, fresh (updated within 7 days) spots within the target radius.
+2. **Conditional Place Details Enrichment:** 
+   - If a fetched spot has fewer than 10 photos, call Place Details when cache is missing or expired to hydrate up to 10 photos.
+   - Store the enriched payload into Supabase immediately. Never call Details for the same store twice within 7 days.
+
+## 2. Google Maps Native Integration (Zero-Cost Deep Linking)
+- **The Rule:** Do NOT use address strings or name strings for external map routing redirection (`?q=address` is banned).
+- **Execution:** Use the `query_place_id` parameter (NOT `query=place_id:...` — that is treated as a text search and fails). Optional `query` carries the display name:
+  `https://www.google.com/maps/search/?api=1&query_place_id=${spot_id}&query=${place_name}`
+
+## 3. Image Metadata Layout Pre-Processing
+- One `FeedSpot` per restaurant; up to 10 photos browsable inside a single card via tap left/right.
+- Analyze `width` vs `height` in cached `photos` to build `photoPages`:
+- **DUAL_STACK (Horizontal):** `width > height` — pair 2 landscape URLs per page.
+- **SINGLE_FULL (Portrait):** `height > width` — 1 vertical URL per page.
+
+## 4. Feed Ratio Engine (3:7)
+- **Classic Pool (30%):** `rating >= 4.2`, limit 3 per batch.
+- **Vibe Pool (70%):** Hidden Gem filters below, limit 7 per batch.
+
+## 5. Anti-Chain & Hidden Gem Filter Rules (隠れ家フィルター)
+
+Prevent predictable major fast-food chains (McDonald's, KFC, beef-bowl chains, etc.) from dominating the feed. Apply all three layers:
+
+### ① API Ingestion Exclusion — `excludedPrimaryTypes`
+When calling Google `searchNearby`, exclude chain-heavy primary types **at request time** before data hits Supabase.
+
+**File:** `lib/places/ingest.ts` → `fetchNearbyPlaces()`
+
+```json
+{
+  "includedTypes": ["restaurant", "cafe"],
+  "excludedPrimaryTypes": ["fast_food_restaurant", "sandwich_shop"],
+  "maxResultCount": 20,
+  "locationRestriction": { ... }
+}
+```
+
+- Do NOT include `meal_takeaway` in `includedTypes` — it pulls in chain takeaway.
+- `fast_food_restaurant` blocks McDonald's, KFC, gyudon chains, etc.
+- `sandwich_shop` blocks Subway-style chains.
+
+### ② Hidden Gem SQL — Review Count Cap (70% Vibe Pool)
+Chain stores and mega-famous spots accumulate thousands of reviews. Local hidden gems typically sit in the **15–300 review** sweet spot with high ratings.
+
+**File:** `app/api/swipe/route.ts` → vibe pool Supabase query
+
+```sql
+-- Equivalent filters applied via Supabase client:
+WHERE rating >= 4.0
+  AND user_rating_count BETWEEN 15 AND 300
+```
+
+Constants: `HIDDEN_GEM_MIN_RATING = 4.0`, `HIDDEN_GEM_MIN_REVIEWS = 15`, `HIDDEN_GEM_MAX_REVIEWS = 300`.
+
+**Effect:** Surfaces high-quality independent restaurants that locals love but tourists haven't flooded yet.
+
+### ③ Price Level Targeting — Premium Theme Tags
+Fast-food chains are almost always `priceLevel: 1` (￥). When the feed theme targets "nice dinner" or "date night", restrict to mid-to-upper price tiers.
+
+**File:** `app/api/swipe/route.ts` → applied when `?tag=` matches a premium vibe tag.
+
+```typescript
+// Tags: splurge | date | dinner | reward
+if (PREMIUM_VIBE_TAGS.has(tag)) {
+  query.gte("price_level", 2).lte("price_level", 3); // ￥￥〜￥￥￥
+}
+```
+
+**Effect:** Removes ￥-tier fast food; surfaces independent bistros, izakaya, and ramen shops with real character.
+
+### Rules Summary
+| Layer | Where | What |
+|---|---|---|
+| Type exclusion | Google API ingest | `excludedPrimaryTypes` |
+| Review cap | Supabase vibe query | 15 ≤ reviews ≤ 300, rating ≥ 4.0 |
+| Price filter | Supabase vibe query (premium tags) | price_level 2–3 |
+
+Never weaken these filters to "fill" the feed — expand radius instead (`RADIUS_STEPS`).

@@ -1,0 +1,90 @@
+---
+description: "Cursor rules only for this app. this is a strategy for how to maximize my monetizing fron affilieiting from booking in other website"
+globs: **/*
+alwaysApply: false
+---
+
+Please refactor our swipe feed engine (`app/api/swipe/route.ts` and `ingest.ts`) to implement our comprehensive Japan-focused monetization, API cost defense, multi-lingual support, and user swipe limits.
+
+Please implement the specifications below precisely without breaking existing code features.
+
+---
+
+### 1. ENVIRONMENT VARIABLES
+Ensure the system loads the following environment variables. Use placeholders or mock logic if they are not set:
+- `HOTPEPPER_API_KEY` (For Hotpepper Gourmet Search API)
+- `VALUE_COMMERCE_SID` (Affiliate SID)
+- `VALUE_COMMERCE_PID` (Affiliate PID)
+
+---
+
+### 2. DATABASE SCHEMA MIGRATION HINT
+We need to cache affiliate booking URLs directly inside our Supabase `spots` table to minimize API consumption.
+- Please assume the existence of (or write code to handle) two new optional text columns in the `spots` table:
+  1. `hotpepper_url` (The raw web URL from Hotpepper API)
+  2. `booking_url` (The wrapped, finalized affiliate redirection URL or fallback Google reservation URL)
+- Ensure your upsert/ingestion code stores these fields when details are hydrated.
+
+---
+
+### 3. SHIBUYA-BASED OVERSEAS DEMO MODE
+- Check the incoming coordinate parameters (`lat`, `lng`).
+- If the location is outside of Japan (e.g., coordinates matching Europe/Hungary), trigger "Tourist Demo Mode".
+- Force-override the coordinates to Shibuya, Tokyo (`lat: 35.658034`, `lng: 139.701636`) and bypass the live Google Places API ingestion. Instead, serve pre-hydrated spots from our Japanese cache pool. This ensures overseas interviewers can test the application smoothly with zero live API overhead.
+
+---
+
+### 4. INGEST THROTTLING & LIKE-TRIGGERED LOCKS
+- Inspect the query parameters for a current session's like count (e.g., `?likes=X`).
+- **Billing Safe Guard:**
+  - If the user is actively swiping Left (Dislikes only, `likes` is low/0), block any live Google API fetch (`ensureSpotsCached`). Instead, widen the local Supabase bounding box (from 2km up to 10km) to query and return already cached historical Japanese spots.
+  - Only execute Google Places API ingestion when the local database cache is dry AND the user is actively registering Right Swipes (Likes).
+
+---
+
+### 5. HARD-CODED PAYWALL (SWIPE LIMITATION)
+- Check the incoming `likes` parameter.
+- If `likes` >= 30, return a `402 Payment Required` HTTP response with a custom JSON payload:
+  ```json
+  {
+    "error": "LIMIT_REACHED",
+    "message": "Please upgrade to Premium for unlimited swiping! / 制限に達しました。プレミアムプランに登録して無制限スワイプを楽しもう！"
+  }
+This serves as our hardcoded demo-paywall for monetization presentation.
+
+6. HOTPEPPER HYDRATION & VALUE COMMERCE AFFILIATE WRAPPING
+When fetching/saving details for a spot, execute this matching routine before outputting booking_url:
+
+Recruit/Hotpepper API Match:
+
+Query https://webservice.recruit.co.jp/hotpepper/gourmet/v1/ using the spot's phone number (format cleaned to standard local digits, e.g., +81 stripped to 0, hyphens removed) or fuzzy name matching within 100 meters (range=1).
+
+If a match is found, store the result URL as hotpepper_url.
+
+Affiliate Wrapping:
+
+If hotpepper_url exists, wrap it into a ValueCommerce MyLink:
+https://ck.jp.ap.valuecommerce.com/servlet/referral?sid=${VALUE_COMMERCE_SID}&pid=${VALUE_COMMERCE_PID}&vc_url=${encodeURIComponent(hotpepper_url)}
+Save this final URL as booking_url.
+
+If there is no Hotpepper match, fallback to the Google places.reservationUri as the booking_url (without affiliate wrapper, to preserve UX). If both are empty, default to the zero-cost Places ID maps link.
+
+7. ABSOLUTE REVIEW-COUNT FILTERING (Spots Quality Control)
+Refactor queryEligiblePools to filter spots by user_rating_count:
+
+Noise Floor: Exclude all spots where user_rating_count < 60 (ensures high-quality assets).
+
+Classic Pool: Filter by user_rating_count >= 500 (disregard minimum ratings).
+
+Vibe Pool: Filter by user_rating_count BETWEEN 60 AND 499 (keep existing vibe tags/price categorization).
+
+8. AD INJECTION
+Right before returning the final JSON list (max 20 items):
+
+Calculate a random index between 7 and 11 (7 + Math.floor(Math.random() * 5)).
+
+Inject this dummy Ad item at that index:
+
+TypeScript
+{ id: "ad-slot-google-admob", layoutType: "AD_NATIVE", name: "Sponsored" }
+Please refactor app/api/swipe/route.ts and ingest.ts based on these rules cleanly.

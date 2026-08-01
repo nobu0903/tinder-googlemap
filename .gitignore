@@ -1,8 +1,66 @@
-node_modules
-.next
-out
-.env*.local
-/AI-images
-.cursor
+# ── Dependencies ─────────────────────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ── Next.js / build ──────────────────────────────────────────────────────────
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+# next-env.d.ts は Next が生成するがリポジトリに含めるのが一般的
+
+# ── Env / secrets（example はコミットする）──────────────────────────────────
+.env
+.env.*
+!.env*.example
+!.env.example
+
+# ── Test / coverage ──────────────────────────────────────────────────────────
+coverage/
+.nyc_output/
+vitest.config.ts.timestamp-*
+
+# ── Logs / debug ─────────────────────────────────────────────────────────────
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# ── Editor / IDE ─────────────────────────────────────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Cursor（rules は共有したいので残す）────────────────────────────────────
+.cursor/*
+!.cursor/rules/
+
+# ── Local notes / scratch ────────────────────────────────────────────────────
 memo.txt
-/bugs
+doublelanguage.txt
+*.local.md
+
+# ── Project-local (not needed in the repo / deploy) ──────────────────────────
+# Bug tracker markdown (local workflow)
+/bugs/
+
+# Design dumps / AI mockups (runtime assets live under public/)
+/AI-images/
+/assets/
+
+# Optional local scripts output
+/tmp/
+/temp/
