@@ -1,6 +1,7 @@
 "use client";
 
 import { MapPin } from "lucide-react";
+import { WaitlistHeaderButton } from "@/components/waitlist/waitlist-header-button";
 import { useLang } from "@/lib/i18n/context";
 
 interface ExploreHeaderProps {
@@ -10,7 +11,8 @@ interface ExploreHeaderProps {
 export function ExploreHeader({ locationLabel }: ExploreHeaderProps) {
   const { t } = useLang();
   return (
-    <header className="flex shrink-0 flex-col items-center pb-3 pt-2">
+    <header className="relative flex shrink-0 flex-col items-center px-4 pb-3 pt-2">
+      <WaitlistHeaderButton className="absolute right-4 top-2" />
       <h1 className="flex items-center gap-1.5 text-sm font-bold tracking-[0.14em] text-electric-chilli drop-shadow-[0_0_8px_rgba(224,62,0,0.3)]">
         <MapPin className="size-4 fill-electric-chilli stroke-electric-chilli" />
         {t("explore.header")}

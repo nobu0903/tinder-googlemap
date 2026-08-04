@@ -19,6 +19,8 @@ export default function PrivacyPage() {
       <Section title="2. 取得する情報">
         <ul className="list-disc space-y-1 pl-5">
           <li>アカウント登録時のメールアドレスおよび認証に必要な情報</li>
+          <li>モバイル版ウェイトリスト登録時のメールアドレス、希望プラットフォーム、任意の要望内容</li>
+          <li>フィードバック送信時の内容（対象画面・種類・本文など）および任意の返信用メール</li>
           <li>位置情報（許可した場合、またはエリア選択により指定した位置）</li>
           <li>スワイプ・いいね・設定などの利用履歴</li>
           <li>端末・ブラウザ情報、IPアドレス、Cookie等の技術情報</li>
@@ -32,6 +34,7 @@ export default function PrivacyPage() {
           <li>周辺店舗の検索・表示、おすすめの生成</li>
           <li>本人確認、不正利用の防止</li>
           <li>お問い合わせへの対応</li>
+          <li>モバイルアプリ公開時のお知らせ（ウェイトリスト登録者への連絡）</li>
           <li>広告配信（Google AdSense等）および利用状況の分析</li>
         </ul>
       </Section>

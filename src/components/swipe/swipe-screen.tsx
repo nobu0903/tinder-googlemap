@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MobileShell } from "@/components/layout/mobile-shell";
 import { BottomNav } from "@/components/layout/bottom-nav";
+import { WaitlistHeaderButton } from "@/components/waitlist/waitlist-header-button";
 import { SwipeCard } from "@/components/swipe/swipe-card";
 import { NativeAdCard } from "@/components/swipe/native-ad-card";
 import { SwipeActions } from "@/components/swipe/swipe-actions";
@@ -14,6 +15,10 @@ import { useSwipeFeed } from "@/lib/hooks/use-swipe-feed";
 import { useAuth } from "@/lib/hooks/use-auth";
 import { useLocation } from "@/lib/hooks/use-location";
 import { useFreeSwipeQuota } from "@/lib/hooks/use-free-swipe-quota";
+import {
+  loadLocationSession,
+  saveLocationLabel,
+} from "@/lib/location/location-session";
 import { buildLoginPath } from "@/lib/auth/safe-redirect";
 import { EXPLORE_THEMES } from "@/lib/explore-mock";
 import { useLang } from "@/lib/i18n/context";
@@ -39,9 +44,14 @@ export function SwipeScreen() {
   const { coords, status, setManualCoords } = useLocation();
   const { used, limit, isLimitReached, consume } = useFreeSwipeQuota();
   const { t, lang } = useLang();
-  const [locationLabel, setLocationLabel] = useState<string | null>(
-    labelParam ?? null,
-  );
+  const [locationLabel, setLocationLabel] = useState<string | null>(() => {
+    if (labelParam) return labelParam;
+    return loadLocationSession()?.label ?? null;
+  });
+
+  useEffect(() => {
+    saveLocationLabel(locationLabel);
+  }, [locationLabel]);
   const [moreInfoOpen, setMoreInfoOpen] = useState(false);
   const [pickingLocation, setPickingLocation] = useState(false);
   const swipeTriggerRef = useRef<((action: SwipeAction) => void) | null>(null);
@@ -164,7 +174,8 @@ export function SwipeScreen() {
   return (
     <MobileShell>
       <main className="flex min-h-0 flex-1 flex-col px-4 pb-28 pt-6">
-        <header className="mb-4 flex shrink-0 flex-col items-center">
+        <header className="relative mb-4 flex shrink-0 flex-col items-center">
+          <WaitlistHeaderButton className="absolute right-0 top-0" />
           <h1 className="text-sm font-bold tracking-[0.18em] text-electric-chilli drop-shadow-[0_0_8px_rgba(224,62,0,0.25)]">
             🔥 {t("nav.swipe")}
           </h1>

@@ -1,8 +1,17 @@
 "use client";
 
 // useSwipeFeed — one card per spot; tracks seen IDs to prevent repeat loops.
+// Queue / seen / hydrate / in-flight fetch live in a module session so
+// BottomNav navigations and React Strict Mode remounts do not double-hit
+// /api/swipe.
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  type MutableRefObject,
+} from "react";
 import type { FeedSpot, SwipeAction, SwipeFeedItem } from "@/types/backend";
 import {
   feedItemKey,
@@ -11,11 +20,14 @@ import {
 import type { Coordinates } from "@/lib/hooks/use-location";
 import { feedSpotNeedsHydrate } from "@/lib/places/enrichment-gate";
 import { openCurrentNativeAd } from "@/lib/ads/native-ad-opener";
+import {
+  loadNearbySwipeFeedSession,
+  runFeedFetchExclusive,
+  saveSwipeFeedSession,
+  swipeFeedCacheKey,
+  type SwipeFeedSessionSnapshot,
+} from "@/lib/feed/swipe-feed-session";
 
-/** Refetch only when the queue is fully exhausted */
-const REFETCH_WHEN_EMPTY = true;
-/** Minimum gap between /api/swipe calls (ms) */
-const MIN_FEED_FETCH_INTERVAL_MS = 2 * 60 * 1000;
 /** Cap Place Details hydrates per browser session (photos + booking) */
 const MAX_SESSION_HYDRATES = 16;
 
@@ -29,16 +41,33 @@ interface UseSwipeFeedOptions {
 
 interface UseSwipeFeedReturn {
   currentItem: SwipeFeedItem | null;
-  /** Peek at queue[1] for cover-photo prefetch (null if empty / ad-only next). */
   nextItem: SwipeFeedItem | null;
   queueLength: number;
   isInitialLoading: boolean;
   isRefetching: boolean;
   error: string | null;
-  /** True when a tag was requested but fewer than 6 vibe spots matched — classic fills in. */
   isSparseTheme: boolean;
   advance: () => void;
   recordSwipe: (action: SwipeAction) => void;
+}
+
+function applySnapshotToRefs(
+  snap: SwipeFeedSessionSnapshot,
+  refs: {
+    queueRef: MutableRefObject<SwipeFeedItem[]>;
+    seenSpotIdsRef: MutableRefObject<Set<string>>;
+    hydrateRequestedRef: MutableRefObject<Set<string>>;
+    sessionHydratesRef: MutableRefObject<number>;
+    lastFetchAtRef: MutableRefObject<number>;
+    activeCacheKeyRef: MutableRefObject<string | null>;
+  },
+) {
+  refs.queueRef.current = snap.queue;
+  refs.seenSpotIdsRef.current = new Set(snap.seenSpotIds);
+  refs.hydrateRequestedRef.current = new Set(snap.hydrateRequested);
+  refs.sessionHydratesRef.current = snap.sessionHydrates;
+  refs.lastFetchAtRef.current = snap.lastFetchAt;
+  refs.activeCacheKeyRef.current = snap.cacheKey;
 }
 
 export function useSwipeFeed({
@@ -47,57 +76,138 @@ export function useSwipeFeed({
   coords,
   enabled = true,
 }: UseSwipeFeedOptions): UseSwipeFeedReturn {
-  const [queue, setQueue] = useState<SwipeFeedItem[]>([]);
-  const [isInitialLoading, setIsInitialLoading] = useState(false);
+  const initialSnap =
+    coords != null ? loadNearbySwipeFeedSession(coords, tag) : null;
+
+  const [queue, setQueue] = useState<SwipeFeedItem[]>(
+    () => initialSnap?.queue ?? [],
+  );
+  const [isInitialLoading, setIsInitialLoading] = useState(
+    () => !(initialSnap && initialSnap.queue.length > 0),
+  );
   const [isRefetching, setIsRefetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isSparseTheme, setIsSparseTheme] = useState(false);
+  const [isSparseTheme, setIsSparseTheme] = useState(
+    () => initialSnap?.isSparseTheme ?? false,
+  );
 
-  const fetchingRef = useRef(false);
-  const queueRef = useRef<SwipeFeedItem[]>([]);
-  const seenSpotIdsRef = useRef<Set<string>>(new Set());
-  const hydrateRequestedRef = useRef<Set<string>>(new Set());
-  const sessionHydratesRef = useRef(0);
-  const lastFetchAtRef = useRef(0);
+  const queueRef = useRef<SwipeFeedItem[]>(initialSnap?.queue ?? []);
+  const seenSpotIdsRef = useRef<Set<string>>(
+    new Set(initialSnap?.seenSpotIds ?? []),
+  );
+  const hydrateRequestedRef = useRef<Set<string>>(
+    new Set(initialSnap?.hydrateRequested ?? []),
+  );
+  const sessionHydratesRef = useRef(initialSnap?.sessionHydrates ?? 0);
+  const lastFetchAtRef = useRef(initialSnap?.lastFetchAt ?? 0);
   const coordsRef = useRef<Coordinates | null>(coords);
+  const activeCacheKeyRef = useRef<string | null>(
+    initialSnap?.cacheKey ?? null,
+  );
 
-  // ── Volatile-value refs (avoid stale closures without re-creating callbacks) ──
   const accessTokenRef = useRef(accessToken);
   const tagRef = useRef(tag);
   const enabledRef = useRef(enabled);
 
-  useEffect(() => { queueRef.current = queue; }, [queue]);
-  useEffect(() => { accessTokenRef.current = accessToken; }, [accessToken]);
-  useEffect(() => { tagRef.current = tag; }, [tag]);
-  useEffect(() => { enabledRef.current = enabled; }, [enabled]);
+  useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
+  useEffect(() => {
+    accessTokenRef.current = accessToken;
+  }, [accessToken]);
+  useEffect(() => {
+    tagRef.current = tag;
+  }, [tag]);
+  useEffect(() => {
+    enabledRef.current = enabled;
+  }, [enabled]);
 
-  // Location change: drop old-area cards and allow an immediate refetch.
-  // Does NOT clear seenSpotIds or the free-tier swipe counter (absolute quota).
   const coordsKey =
     coords != null ? `${coords.lat.toFixed(5)},${coords.lng.toFixed(5)}` : null;
-  const prevCoordsKeyRef = useRef<string | null>(null);
+
+  // Restore when area / theme identity changes (not on every remount with same area).
   useEffect(() => {
     coordsRef.current = coords;
-    if (coordsKey === prevCoordsKeyRef.current) return;
-    const hadPrevious = prevCoordsKeyRef.current !== null;
-    prevCoordsKeyRef.current = coordsKey;
-    if (!hadPrevious || coordsKey === null) return;
+    if (!coords) {
+      activeCacheKeyRef.current = null;
+      return;
+    }
 
+    const key = swipeFeedCacheKey(coords, tag);
+    const cached = loadNearbySwipeFeedSession(coords, tag);
+
+    if (cached && cached.queue.length > 0) {
+      if (activeCacheKeyRef.current === cached.cacheKey && queueRef.current.length > 0) {
+        return;
+      }
+      applySnapshotToRefs(cached, {
+        queueRef,
+        seenSpotIdsRef,
+        hydrateRequestedRef,
+        sessionHydratesRef,
+        lastFetchAtRef,
+        activeCacheKeyRef,
+      });
+      setQueue(cached.queue);
+      setIsSparseTheme(cached.isSparseTheme);
+      setError(null);
+      setIsInitialLoading(false);
+      return;
+    }
+
+    // Warm session with empty queue (swiped through) — keep seen / lastFetchAt
+    if (cached) {
+      applySnapshotToRefs(cached, {
+        queueRef,
+        seenSpotIdsRef,
+        hydrateRequestedRef,
+        sessionHydratesRef,
+        lastFetchAtRef,
+        activeCacheKeyRef,
+      });
+      setQueue([]);
+      setIsSparseTheme(cached.isSparseTheme);
+      return;
+    }
+
+    if (activeCacheKeyRef.current === key) return;
+
+    activeCacheKeyRef.current = key;
     setQueue([]);
     queueRef.current = [];
+    seenSpotIdsRef.current = new Set();
+    hydrateRequestedRef.current = new Set();
+    sessionHydratesRef.current = 0;
     lastFetchAtRef.current = 0;
-    setError(null);
     setIsSparseTheme(false);
-  }, [coords, coordsKey]);
+    setError(null);
+  }, [coords, coordsKey, tag]);
 
-  // ── Page Visibility: pause all fetching when the tab is in the background ──
+  // Persist — never blank out a warm queue from a remount flash.
+  useEffect(() => {
+    if (!coords || !activeCacheKeyRef.current) return;
+    saveSwipeFeedSession({
+      cacheKey: activeCacheKeyRef.current,
+      lat: coords.lat,
+      lng: coords.lng,
+      tag: tag ?? "",
+      queue,
+      seenSpotIds: [...seenSpotIdsRef.current],
+      lastFetchAt: lastFetchAtRef.current,
+      hydrateRequested: [...hydrateRequestedRef.current],
+      sessionHydrates: sessionHydratesRef.current,
+      isSparseTheme,
+    });
+  }, [queue, isSparseTheme, coords, tag]);
+
   const tabHiddenRef = useRef(false);
   useEffect(() => {
     const handleVisibility = () => {
       tabHiddenRef.current = document.visibilityState === "hidden";
     };
     document.addEventListener("visibilitychange", handleVisibility);
-    return () => document.removeEventListener("visibilitychange", handleVisibility);
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibility);
   }, []);
 
   const lazyHydrateQueue = useCallback(async () => {
@@ -137,7 +247,6 @@ export function useSwipeFeed({
         }),
       });
       if (!res.ok) {
-        // Allow retry on rate-limit / transient errors
         for (const id of candidateIds) hydrateRequestedRef.current.delete(id);
         return;
       }
@@ -157,100 +266,125 @@ export function useSwipeFeed({
       );
     } catch {
       for (const id of candidateIds) hydrateRequestedRef.current.delete(id);
-      // Non-fatal
     }
   }, []);
 
-  /**
-   * fetchFeed is intentionally stable (empty volatile deps).
-   * accessToken, tag, enabled are accessed via refs to avoid this callback
-   * being recreated on every Supabase JWT refresh (every ~1 hour), which
-   * would otherwise cause the trigger effect below to fire and make an
-   * unwanted API call when the queue happened to be empty.
-   */
   const fetchFeed = useCallback(async () => {
-    // Pause when tab is hidden (e.g. user minimised browser or closed lid)
     if (tabHiddenRef.current) return;
-    if (!enabledRef.current || fetchingRef.current) return;
+    if (!enabledRef.current) return;
 
     const currentCoords = coordsRef.current;
     if (!currentCoords) return;
 
-    const now = Date.now();
-    const isBackground = queueRef.current.length > 0;
-    if (
-      isBackground &&
-      now - lastFetchAtRef.current < MIN_FEED_FETCH_INTERVAL_MS
-    ) {
-      return;
-    }
+    // Already have cards (e.g. sync restore) — do not refetch on remount.
+    if (queueRef.current.length > 0) return;
 
-    fetchingRef.current = true;
-    if (isBackground) setIsRefetching(true);
-    else setIsInitialLoading(true);
+    const key =
+      activeCacheKeyRef.current ??
+      swipeFeedCacheKey(currentCoords, tagRef.current);
+
+    setIsInitialLoading(true);
     setError(null);
 
-    try {
-      const url = new URL("/api/swipe", window.location.origin);
-      url.searchParams.set("lat", String(currentCoords.lat));
-      url.searchParams.set("lng", String(currentCoords.lng));
-      if (tagRef.current) url.searchParams.set("tag", tagRef.current);
-
-      const exclude = [...seenSpotIdsRef.current].slice(-100);
-      if (exclude.length > 0) {
-        url.searchParams.set("exclude", exclude.join(","));
-      }
-
-      const headers: HeadersInit = {};
-      if (accessTokenRef.current) {
-        headers["Authorization"] = `Bearer ${accessTokenRef.current}`;
-      }
-
-      const res = await fetch(url.toString(), { headers });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(
-          (body as { error?: string }).error ?? `Feed API error: ${res.status}`,
-        );
-      }
-
-      const data = await res.json();
-      const newItems: SwipeFeedItem[] = data.spots ?? [];
-
-      // Track sparse themed feeds so the UI can show a warning banner
-      const vibeCount = typeof data.vibeSpotCount === "number" ? data.vibeSpotCount : null;
-      if (vibeCount !== null && tagRef.current) {
-        setIsSparseTheme(vibeCount < 6);
-      }
-
-      setQueue((prev) => {
-        const inQueue = new Set(prev.map(feedItemKey));
-        const fresh = newItems.filter((item) => {
-          const key = feedItemKey(item);
-          if (isFeedNativeAd(item)) return !inQueue.has(key);
-          return !seenSpotIdsRef.current.has(key) && !inQueue.has(key);
+    await runFeedFetchExclusive(key, async () => {
+      // Another instance may have filled the queue while we waited for the lock
+      const raced = loadNearbySwipeFeedSession(currentCoords, tagRef.current);
+      if (raced && raced.queue.length > 0) {
+        applySnapshotToRefs(raced, {
+          queueRef,
+          seenSpotIdsRef,
+          hydrateRequestedRef,
+          sessionHydratesRef,
+          lastFetchAtRef,
+          activeCacheKeyRef,
         });
-        return [...prev, ...fresh];
-      });
-      lastFetchAtRef.current = Date.now();
-      void lazyHydrateQueue();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load feed.");
-    } finally {
-      setIsInitialLoading(false);
-      setIsRefetching(false);
-      fetchingRef.current = false;
-    }
+        setQueue(raced.queue);
+        setIsSparseTheme(raced.isSparseTheme);
+        setIsInitialLoading(false);
+        return;
+      }
+
+      if (queueRef.current.length > 0) {
+        setIsInitialLoading(false);
+        return;
+      }
+
+      try {
+        const url = new URL("/api/swipe", window.location.origin);
+        url.searchParams.set("lat", String(currentCoords.lat));
+        url.searchParams.set("lng", String(currentCoords.lng));
+        if (tagRef.current) url.searchParams.set("tag", tagRef.current);
+
+        const exclude = [...seenSpotIdsRef.current].slice(-100);
+        if (exclude.length > 0) {
+          url.searchParams.set("exclude", exclude.join(","));
+        }
+
+        const headers: HeadersInit = {};
+        if (accessTokenRef.current) {
+          headers.Authorization = `Bearer ${accessTokenRef.current}`;
+        }
+
+        const res = await fetch(url.toString(), { headers });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(
+            (body as { error?: string }).error ??
+              `Feed API error: ${res.status}`,
+          );
+        }
+
+        const data = await res.json();
+        const newItems: SwipeFeedItem[] = data.spots ?? [];
+
+        const vibeCount =
+          typeof data.vibeSpotCount === "number" ? data.vibeSpotCount : null;
+        if (vibeCount !== null && tagRef.current) {
+          setIsSparseTheme(vibeCount < 6);
+        }
+
+        const inQueue = new Set(queueRef.current.map(feedItemKey));
+        const fresh = newItems.filter((item) => {
+          const itemKey = feedItemKey(item);
+          if (isFeedNativeAd(item)) return !inQueue.has(itemKey);
+          return !seenSpotIdsRef.current.has(itemKey) && !inQueue.has(itemKey);
+        });
+        const nextQueue = [...queueRef.current, ...fresh];
+        queueRef.current = nextQueue;
+        lastFetchAtRef.current = Date.now();
+        activeCacheKeyRef.current = key;
+
+        saveSwipeFeedSession(
+          {
+            cacheKey: key,
+            lat: currentCoords.lat,
+            lng: currentCoords.lng,
+            tag: tagRef.current ?? "",
+            queue: nextQueue,
+            seenSpotIds: [...seenSpotIdsRef.current],
+            lastFetchAt: lastFetchAtRef.current,
+            hydrateRequested: [...hydrateRequestedRef.current],
+            sessionHydrates: sessionHydratesRef.current,
+            isSparseTheme: vibeCount !== null && !!tagRef.current && vibeCount < 6,
+          },
+          { allowEmptyOverwrite: true },
+        );
+
+        setQueue(nextQueue);
+        void lazyHydrateQueue();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load feed.");
+      } finally {
+        setIsInitialLoading(false);
+        setIsRefetching(false);
+      }
+    });
   }, [lazyHydrateQueue]);
 
-  /**
-   * Keep a stable ref to the latest fetchFeed so the trigger effect below
-   * does NOT need fetchFeed in its dependency array.  Without this, any change
-   * to fetchFeed (e.g. due to a Supabase JWT refresh changing accessToken) would
-   * re-run the effect and potentially fire an unwanted API call.
-   */
   const fetchFeedRef = useRef(fetchFeed);
-  useEffect(() => { fetchFeedRef.current = fetchFeed; });
+  useEffect(() => {
+    fetchFeedRef.current = fetchFeed;
+  });
 
   const currentItemKey = queue[0] ? feedItemKey(queue[0]) : null;
 
@@ -258,17 +392,41 @@ export function useSwipeFeed({
     if (enabled && coords && queue.length > 0) void lazyHydrateQueue();
   }, [currentItemKey, queue.length, lazyHydrateQueue, enabled, coords]);
 
-  // Trigger effect: only re-runs when queue length, enabled flag, or coords change.
-  // fetchFeed is intentionally NOT a dependency — we access it via fetchFeedRef.
   useEffect(() => {
     if (!enabled || !coords) return;
-    const shouldFetch = REFETCH_WHEN_EMPTY
-      ? queue.length === 0
-      : queue.length <= 3;
-    if (shouldFetch && !fetchingRef.current) {
-      void fetchFeedRef.current();
+
+    // Sync restore already has cards — never fetch.
+    if (queueRef.current.length > 0) {
+      setIsInitialLoading(false);
+      return;
     }
-  }, [queue.length, enabled, coords]);
+
+    if (queueRef.current.length > 0) return;
+    void fetchFeedRef.current();
+  }, [enabled, coords, tag, coordsKey]);
+
+  const persistNow = useCallback(
+    (nextQueue: SwipeFeedItem[], allowEmptyOverwrite: boolean) => {
+      const c = coordsRef.current;
+      if (!c || !activeCacheKeyRef.current) return;
+      saveSwipeFeedSession(
+        {
+          cacheKey: activeCacheKeyRef.current,
+          lat: c.lat,
+          lng: c.lng,
+          tag: tagRef.current ?? "",
+          queue: nextQueue,
+          seenSpotIds: [...seenSpotIdsRef.current],
+          lastFetchAt: lastFetchAtRef.current,
+          hydrateRequested: [...hydrateRequestedRef.current],
+          sessionHydrates: sessionHydratesRef.current,
+          isSparseTheme,
+        },
+        { allowEmptyOverwrite },
+      );
+    },
+    [isSparseTheme],
+  );
 
   const advance = useCallback(() => {
     setQueue((prev) => {
@@ -276,9 +434,11 @@ export function useSwipeFeed({
       if (head && !isFeedNativeAd(head)) {
         seenSpotIdsRef.current.add(feedItemKey(head));
       }
+      queueRef.current = rest;
+      persistNow(rest, true);
       return rest;
     });
-  }, []);
+  }, [persistNow]);
 
   const recordSwipe = useCallback(
     (action: SwipeAction) => {
@@ -286,7 +446,6 @@ export function useSwipeFeed({
       if (!item) return;
 
       if (isFeedNativeAd(item)) {
-        // Right swipe (like) → open advertiser via AdSense click forward
         if (action === "like") {
           openCurrentNativeAd();
         }
@@ -311,6 +470,14 @@ export function useSwipeFeed({
     },
     [queue, advance],
   );
+
+  // When queue empties by swiping, top up once.
+  useEffect(() => {
+    if (!enabled || !coords) return;
+    if (queue.length > 0) return;
+    if (lastFetchAtRef.current === 0) return; // initial load handled elsewhere
+    void fetchFeedRef.current();
+  }, [queue.length, enabled, coords]);
 
   return {
     currentItem: queue[0] ?? null,

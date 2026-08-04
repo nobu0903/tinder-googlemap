@@ -82,3 +82,61 @@ CREATE POLICY "swipes_own_read"
 
 CREATE POLICY "swipes_own_insert"
   ON swipes FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Table: app_waitlist  (mobile app interest list)
+-- Full migration: migrations/004_app_waitlist.sql
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS app_waitlist (
+    id               bigint       PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    email            text         NOT NULL,
+    wants_ios        boolean      NOT NULL DEFAULT false,
+    wants_android    boolean      NOT NULL DEFAULT false,
+    feature_requests text,
+    created_at       timestamptz  NOT NULL DEFAULT now(),
+    updated_at       timestamptz  NOT NULL DEFAULT now(),
+    CONSTRAINT app_waitlist_email_unique UNIQUE (email)
+);
+
+CREATE INDEX IF NOT EXISTS app_waitlist_created_at_idx ON app_waitlist (created_at);
+
+ALTER TABLE app_waitlist ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "app_waitlist_service_all" ON app_waitlist;
+CREATE POLICY "app_waitlist_service_all"
+  ON app_waitlist FOR ALL
+  USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Table: feedback  (in-app guided feedback)
+-- Full migration: migrations/005_feedback.sql
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS feedback (
+    id           bigint       PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    area         text         NOT NULL,
+    kind         text         NOT NULL,
+    message      text         NOT NULL,
+    extra        text,
+    email        text,
+    user_id      uuid         REFERENCES auth.users ON DELETE SET NULL,
+    source       text         NOT NULL DEFAULT 'settings',
+    created_at   timestamptz  NOT NULL DEFAULT now(),
+    CONSTRAINT feedback_area_check CHECK (
+      area IN ('swipe', 'explore', 'collection', 'login', 'ads', 'other')
+    ),
+    CONSTRAINT feedback_kind_check CHECK (
+      kind IN ('bug', 'ux', 'feature', 'other')
+    )
+);
+
+CREATE INDEX IF NOT EXISTS feedback_created_at_idx ON feedback (created_at);
+CREATE INDEX IF NOT EXISTS feedback_kind_idx ON feedback (kind);
+
+ALTER TABLE feedback ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "feedback_service_all" ON feedback;
+CREATE POLICY "feedback_service_all"
+  ON feedback FOR ALL
+  USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');

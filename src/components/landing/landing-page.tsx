@@ -14,6 +14,7 @@ const NAV = [
   { href: "#how", label: "使い方" },
   { href: "#pricing", label: "料金" },
   { href: "#faq", label: "FAQ" },
+  { href: "/waitlist", label: "モバイル版" },
 ] as const;
 
 const FAQ_ITEMS = [
@@ -40,6 +41,10 @@ const FAQ_ITEMS = [
   {
     q: "Proはいつ公開されますか？",
     a: "現在準備中です。公開準備が整い次第お知らせします。",
+  },
+  {
+    q: "スマホアプリはありますか？",
+    a: "ネイティブアプリ（iOS / Android）は準備中です。ウェイトリストにご登録いただくと、公開時にメールでお知らせします。",
   },
 ] as const;
 
@@ -161,15 +166,25 @@ function LpHeader() {
         </Link>
 
         <nav className="hidden items-center gap-9 md:flex">
-          {NAV.map((item) => (
-            <a
-              key={item.href}
-              href={item.href}
-              className="text-[13px] text-white/55 transition-colors hover:text-white"
-            >
-              {item.label}
-            </a>
-          ))}
+          {NAV.map((item) =>
+            item.href.startsWith("/") ? (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="text-[13px] text-white/55 transition-colors hover:text-white"
+              >
+                {item.label}
+              </Link>
+            ) : (
+              <a
+                key={item.href}
+                href={item.href}
+                className="text-[13px] text-white/55 transition-colors hover:text-white"
+              >
+                {item.label}
+              </a>
+            ),
+          )}
         </nav>
 
         <div className="flex items-center gap-3">
@@ -663,6 +678,13 @@ function FinalCtaSection() {
             今すぐ試す
             <span aria-hidden>→</span>
           </Link>
+          <Link
+            href="/waitlist"
+            className="mt-5 inline-flex items-center gap-1.5 text-[13px] text-white/45 transition-colors hover:text-white/75"
+          >
+            <Smartphone className="size-3.5" aria-hidden />
+            モバイル版のウェイトリストに登録
+          </Link>
         </div>
       </Reveal>
     </section>
@@ -687,6 +709,14 @@ function LpFooter() {
         </div>
 
         <ul className="flex flex-wrap justify-center gap-x-8 gap-y-2 text-[11px] text-white/28">
+          <li>
+            <Link
+              href="/waitlist"
+              className="transition-colors hover:text-white/55"
+            >
+              モバイル版ウェイトリスト
+            </Link>
+          </li>
           <li>
             <Link
               href="/privacy"

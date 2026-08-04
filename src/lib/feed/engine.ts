@@ -19,6 +19,7 @@ import {
 } from "@/types/backend";
 import {
   applyAreaGemBands,
+  applyStarvationRelaxation,
   denserAreaProfile,
   getFeedConfig,
   type AreaProfile,
@@ -377,8 +378,14 @@ export async function runFeedAnalyze(
   };
   let queryMs = 0;
 
+  const minEligibleForBreak =
+    excludeIds.length > 0
+      ? Math.min(12, effectiveConfig.minEligibleSpots)
+      : effectiveConfig.minEligibleSpots;
+  const targetBatch = effectiveConfig.feedBatchSize;
+
   for (let step = 0; step < effectiveConfig.radiusStepsM.length; step++) {
-    const radiusM = effectiveConfig.radiusStepsM[step];
+    const radiusM = effectiveConfig.radiusStepsM[step]!;
     const box = boundingBox(lat, lng, radiusM);
 
     // Re-check density at this radius; escalate bands if cache is denser here.
@@ -420,14 +427,53 @@ export async function runFeedAnalyze(
       effectiveConfig,
       tag,
     );
-    usedRadiusM = radiusM;
 
     if (batch.rows.length > spots.length) {
       spots = batch.rows;
       assignments = batch.assignments;
+      usedRadiusM = radiusM;
     }
 
-    if (eligibleAtRadius >= effectiveConfig.minEligibleSpots) break;
+    if (
+      eligibleAtRadius >= minEligibleForBreak &&
+      spots.length >= Math.min(targetBatch, 12)
+    ) {
+      break;
+    }
+  }
+
+  if (spots.length < Math.min(targetBatch, 10)) {
+    effectiveConfig = applyStarvationRelaxation(effectiveConfig);
+    const radiusM =
+      effectiveConfig.radiusStepsM[effectiveConfig.radiusStepsM.length - 1] ??
+      usedRadiusM;
+    const box = boundingBox(lat, lng, radiusM);
+    const queryStart = Date.now();
+    const { classic, vibe, rawClassic, rawVibe } = await queryEligiblePools(
+      box,
+      effectiveConfig,
+      tag,
+    );
+    queryMs += Date.now() - queryStart;
+    poolStats = {
+      classicCandidates: rawClassic,
+      vibeCandidates: rawVibe,
+      classicAfterFilter: classic.length,
+      vibeAfterFilter: vibe.length,
+    };
+    eligibleAtRadius = countEligible(classic, vibe, allExcluded);
+    const batch = buildFeedPoolWithDebug(
+      classic,
+      vibe,
+      allExcluded,
+      effectiveConfig,
+      tag,
+    );
+    if (batch.rows.length > spots.length) {
+      spots = batch.rows;
+      assignments = batch.assignments;
+      usedRadiusM = radiusM;
+    }
   }
 
   const feedSpots = spots.map((row) => rowToFeedSpot(row, lat, lng));
@@ -603,15 +649,9 @@ export async function runFeedEngine(
   const { lat, lng, tag, excludeIds = [], skipHydrate = false, forceIngest = false } = opts;
   const allExcluded = new Set(excludeIds);
 
-  // Scale gem bands to local density (local≈Sapporo, tourist≈Tokyo).
-  // Probe all radius steps up front so Admin / cold cache still picks tourist.
-  let areaDensity = await resolveAreaProfile(
-    lat,
-    lng,
-    ingestProfile === "production"
-      ? config.radiusStepsM.filter((r) => r <= 5_000)
-      : config.radiusStepsM,
-  );
+  // Scale gem bands to cached density (local≈Sapporo, tourist≈Tokyo).
+  // Probe the full radius ladder so cold 2km cache does not pin "local" forever.
+  let areaDensity = await resolveAreaProfile(lat, lng, config.radiusStepsM);
   let areaProfile = areaDensity.profile;
   let effectiveConfig = applyAreaGemBands(config, areaProfile);
 
@@ -630,21 +670,22 @@ export async function runFeedEngine(
   let queryMs = 0;
   const totalApiCalls: IngestApiCalls = { ...EMPTY_INGEST_API_CALLS };
 
-  const radiusSteps =
-    ingestProfile === "production"
-      ? config.radiusStepsM.filter((r) => r <= 5_000)
-      : config.radiusStepsM;
+  // Full ladder: 2 → 3 → 5 → 10 km. Continuation fetches (with excludes) expand sooner.
+  const radiusSteps = config.radiusStepsM;
+  const targetBatch = effectiveConfig.feedBatchSize;
+  const minEligibleForBreak =
+    excludeIds.length > 0
+      ? Math.min(12, effectiveConfig.minEligibleSpots)
+      : effectiveConfig.minEligibleSpots;
 
   for (let step = 0; step < radiusSteps.length; step++) {
-    const radiusM = radiusSteps[step];
-    // Widen radius only when the previous step left the eligible pool thin.
-    // On expansion (step > 0), force a fresh Nearby for that larger circle —
-    // otherwise production only re-queries the same 2km-heavy cache and the
-    // 5km step is a no-op. (10km stays admin-only via radiusSteps filter.)
+    const radiusM = radiusSteps[step]!;
+    // Expand when prior step was thin on *eligible* count OR returned a short page.
+    const priorTooThin =
+      eligibleAtRadius < minEligibleForBreak ||
+      spots.length < Math.min(targetBatch, 10);
     const shouldForce =
-      forceIngest ||
-      (step > 0 &&
-        eligibleAtRadius < effectiveConfig.minEligibleSpots);
+      forceIngest || (step > 0 && priorTooThin);
 
     const ingestStart = Date.now();
     const ingestResult = await ensureSpotsCached({
@@ -654,8 +695,7 @@ export async function runFeedEngine(
       excludedIds: excludeIds,
       forceFetch: shouldForce,
       ingestProfile,
-      // Expansion forceFetch already bypasses cooldown inside ensureSpotsCached.
-      bypassCooldown: forceIngest,
+      bypassCooldown: forceIngest || shouldForce,
       vibeMinReviews: effectiveConfig.vibeMinReviews,
       vibeMaxReviews: effectiveConfig.vibeMaxReviews,
     });
@@ -714,7 +754,64 @@ export async function runFeedEngine(
       usedRadiusM = radiusM;
     }
 
-    if (eligibleAtRadius >= effectiveConfig.minEligibleSpots) break;
+    // Stop only when we have both a healthy eligible pool AND a full-enough page.
+    if (
+      eligibleAtRadius >= minEligibleForBreak &&
+      spots.length >= Math.min(targetBatch, 12)
+    ) {
+      break;
+    }
+  }
+
+  // Starvation pass: ladder finished but page still short → widen bands once.
+  if (spots.length < Math.min(targetBatch, 10)) {
+    effectiveConfig = applyStarvationRelaxation(effectiveConfig);
+    const radiusM = radiusSteps[radiusSteps.length - 1] ?? usedRadiusM;
+    const ingestStart = Date.now();
+    const ingestResult = await ensureSpotsCached({
+      lat,
+      lng,
+      radiusMeters: radiusM,
+      excludedIds: excludeIds,
+      forceFetch: true,
+      ingestProfile,
+      bypassCooldown: true,
+      vibeMinReviews: effectiveConfig.vibeMinReviews,
+      vibeMaxReviews: effectiveConfig.vibeMaxReviews,
+    });
+    ingestedCount += ingestResult.ingested;
+    totalApiCalls.nearbySearch += ingestResult.apiCalls.nearbySearch;
+    totalApiCalls.textSearch += ingestResult.apiCalls.textSearch;
+    ingestMs += Date.now() - ingestStart;
+
+    const box = boundingBox(lat, lng, radiusM);
+    const queryStart = Date.now();
+    const { classic, vibe, rawClassic, rawVibe } = await queryEligiblePools(
+      box,
+      effectiveConfig,
+      tag,
+    );
+    queryMs += Date.now() - queryStart;
+
+    poolStats = {
+      classicCandidates: rawClassic,
+      vibeCandidates: rawVibe,
+      classicAfterFilter: classic.length,
+      vibeAfterFilter: vibe.length,
+    };
+    eligibleAtRadius = countEligible(classic, vibe, allExcluded);
+    const batch = buildFeedPoolWithDebug(
+      classic,
+      vibe,
+      allExcluded,
+      effectiveConfig,
+      tag,
+    );
+    if (batch.rows.length > spots.length) {
+      spots = batch.rows;
+      assignments = batch.assignments;
+      usedRadiusM = radiusM;
+    }
   }
 
   const hydrateStart = Date.now();
