@@ -108,7 +108,7 @@ const DeleteBodySchema = z.object({
   confirm: z.string().optional(),
 });
 
-export const HARD_DELETE_CONFIRM = "DELETE_ALL_SPOTS_AND_SWIPES";
+const HARD_DELETE_CONFIRM = "DELETE_ALL_SPOTS_AND_SWIPES";
 
 /**
  * Default: soft-invalidate cache (safe for likes).
