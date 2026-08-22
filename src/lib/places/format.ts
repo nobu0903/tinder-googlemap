@@ -7,64 +7,12 @@ import type {
   FeedPhotoPage,
   OpeningHoursPeriod,
 } from "@/types/backend";
-import { MAX_STORED_PHOTOS, SWIPE_CARD_PHOTO_WIDTH } from "@/types/backend";
-import {
-  stripHoursUnavailableStub,
-  usableWeekdayDescriptions,
-} from "@/lib/places/enrichment-gate";
+import { MAX_STORED_PHOTOS } from "@/types/backend";
+import { stripHoursUnavailableStub } from "@/lib/places/enrichment-gate";
 import { toClientPhotoUrl } from "@/lib/places/photo-url";
 
 /** Japan product — Google periods are local wall times; evaluate in Tokyo. */
 export const FEED_TIMEZONE = "Asia/Tokyo";
-
-const WEEKDAY_LABELS_JA = [
-  "日曜日",
-  "月曜日",
-  "火曜日",
-  "水曜日",
-  "木曜日",
-  "金曜日",
-  "土曜日",
-] as const;
-
-function pad2(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-/**
- * Build weekly lines from Google periods when weekdayDescriptions is missing.
- * Order matches typical Japanese Places output (Mon → Sun).
- */
-export function formatWeekdayDescriptionsFromPeriods(
-  periods: OpeningHoursPeriod[],
-): string[] {
-  if (!periods.length) return [];
-
-  const byDay = new Map<number, string[]>();
-  for (const p of periods) {
-    const day = p.open.day;
-    if (day < 0 || day > 6) continue;
-    const open = `${pad2(p.open.hour)}:${pad2(p.open.minute)}`;
-    const range = p.close
-      ? `${open}～${pad2(p.close.hour)}:${pad2(p.close.minute)}`
-      : `${open}～`;
-    const list = byDay.get(day) ?? [];
-    list.push(range);
-    byDay.set(day, list);
-  }
-
-  if (byDay.size === 0) return [];
-
-  // Monday-first like Google's ja weekdayDescriptions
-  const order = [1, 2, 3, 4, 5, 6, 0];
-  return order.map((day) => {
-    const ranges = byDay.get(day);
-    if (!ranges?.length) {
-      return `${WEEKDAY_LABELS_JA[day]}: 定休日`;
-    }
-    return `${WEEKDAY_LABELS_JA[day]}: ${ranges.join("、")}`;
-  });
-}
 
 const WEEKDAY_TO_DAY: Record<string, number> = {
   Sun: 0,
@@ -264,7 +212,7 @@ function isLandscape(photo: SpotPhoto): boolean {
 
 function toPhotoMeta(photo: SpotPhoto, row: SpotRow, index: number) {
   return {
-    url: toClientPhotoUrl(photo.url, SWIPE_CARD_PHOTO_WIDTH),
+    url: toClientPhotoUrl(photo.url),
     alt: `${row.name} photo ${index + 1}`,
   };
 }
@@ -343,16 +291,6 @@ export function rowToFeedSpot(
   const bookingResolved =
     row.booking_url != null || row.hotpepper_url != null;
 
-  const googleWeekly = usableWeekdayDescriptions(hours);
-  const periods = hours?.periods ?? [];
-  const synthesized =
-    googleWeekly.length > 0
-      ? []
-      : formatWeekdayDescriptionsFromPeriods(periods);
-  // Prefer Google localized lines; otherwise show period-derived weekly table.
-  const weekdayDescriptions =
-    googleWeekly.length > 0 ? googleWeekly : synthesized;
-
   return {
     id: row.id,
     spotId: row.id,
@@ -363,8 +301,6 @@ export function rowToFeedSpot(
     reviewCount: row.user_rating_count,
     priceLevel: row.price_level,
     priceLabel: formatPriceLabel(row.price_level),
-    lat: row.lat,
-    lng: row.lng,
     distanceKm:
       Math.round(haversineKm(userLat, userLng, row.lat, row.lng) * 10) / 10,
     isOpen: isOpenNow(row),
@@ -374,9 +310,7 @@ export function rowToFeedSpot(
     photos: firstPage?.photos ?? [],
     vibeTags: row.vibe_tags,
     address: row.address,
-    weekdayDescriptions,
-    openingPeriods: periods,
-    hoursFromGoogle: googleWeekly.length > 0,
+    weekdayDescriptions: hours?.weekdayDescriptions ?? [],
     bookingUrl: row.booking_url ?? null,
     bookingResolved,
   };

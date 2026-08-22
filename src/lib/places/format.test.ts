@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   formatPriceLabel,
-  formatWeekdayDescriptionsFromPeriods,
   getTodayClose,
   isOpenNow,
 } from "@/lib/places/format";
@@ -31,7 +30,7 @@ function spotWithPeriods(
     updated_at: new Date().toISOString(),
     hotpepper_url: null,
     booking_url: null,
-  } as SpotRow;
+  } as unknown as SpotRow;
 }
 
 describe("formatPriceLabel (BUG-016)", () => {
@@ -68,25 +67,6 @@ describe("isOpenNow (BUG-011 / BUG-012)", () => {
     ]);
     expect(isOpenNow(row, new Date("2026-07-22T03:00:00Z"))).toBe(true);
     expect(isOpenNow(row, new Date("2026-07-22T14:00:00Z"))).toBe(false);
-  });
-});
-
-describe("formatWeekdayDescriptionsFromPeriods", () => {
-  it("builds Mon–Sun Japanese lines with closed days", () => {
-    const lines = formatWeekdayDescriptionsFromPeriods([
-      {
-        open: { day: 1, hour: 11, minute: 0 },
-        close: { day: 1, hour: 22, minute: 0 },
-      },
-      {
-        open: { day: 5, hour: 11, minute: 30 },
-        close: { day: 5, hour: 23, minute: 0 },
-      },
-    ]);
-    expect(lines).toHaveLength(7);
-    expect(lines[0]).toBe("月曜日: 11:00～22:00");
-    expect(lines[4]).toBe("金曜日: 11:30～23:00");
-    expect(lines[6]).toBe("日曜日: 定休日");
   });
 });
 

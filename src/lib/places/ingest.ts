@@ -25,11 +25,9 @@ import { DEFAULT_FEED_CONFIG } from "@/lib/feed/config";
 import {
   DETAILS_FULL_FIELD_MASK,
   detailsFieldMask,
-  hasRealOpeningHours,
   isHoursUnavailableStub,
   needsDetailsEnrichment,
   stripHoursUnavailableStub,
-  usableWeekdayDescriptions,
 } from "@/lib/places/enrichment-gate";
 
 const GOOGLE_PLACES_BASE = "https://places.googleapis.com/v1";
@@ -110,7 +108,6 @@ const SEARCH_FIELD_MASK = [
   "places.primaryType",
   "places.photos",
   "places.currentOpeningHours",
-  "places.regularOpeningHours",
   "places.location",
 ].join(",");
 
@@ -155,7 +152,7 @@ function normalizePriceLevel(raw: number | string | undefined): number | null {
  * Store a keyless Places media URL (resource identity + preferred width).
  * Clients never see this directly — APIs rewrite via `toClientPhotoUrl` → `/api/photo`.
  */
-function buildPhotoUrl(photoName: string, maxWidth = 480): string {
+function buildPhotoUrl(photoName: string, maxWidth = 800): string {
   return `${GOOGLE_PLACES_BASE}/${photoName}/media?maxWidthPx=${maxWidth}`;
 }
 
@@ -208,79 +205,11 @@ function deriveVibeTags(place: GooglePlacesPlace): string[] {
 function mapOpeningHours(
   place: GooglePlacesPlace,
 ): OpeningHours | null {
-  const regular = place.regularOpeningHours;
-  const current = place.currentOpeningHours;
-  if (!regular && !current) return null;
-
-  // Prefer regular weekly schedule for the hours table; fall back to current.
-  const regularWeekly = usableWeekdayDescriptions({
-    openNow: false,
-    periods: regular?.periods ?? [],
-    weekdayDescriptions: regular?.weekdayDescriptions ?? [],
-  });
-  const currentWeekly = usableWeekdayDescriptions({
-    openNow: false,
-    periods: current?.periods ?? [],
-    weekdayDescriptions: current?.weekdayDescriptions ?? [],
-  });
-  const weekdayDescriptions =
-    regularWeekly.length > 0
-      ? (regular?.weekdayDescriptions ?? [])
-      : currentWeekly.length > 0
-        ? (current?.weekdayDescriptions ?? [])
-        : [];
-
-  const periods =
-    (regular?.periods?.length ?? 0) > 0
-      ? (regular?.periods ?? [])
-      : (current?.periods ?? []);
-
-  if (
-    periods.length === 0 &&
-    usableWeekdayDescriptions({
-      openNow: false,
-      periods,
-      weekdayDescriptions,
-    }).length === 0
-  ) {
-    return null;
-  }
-
+  if (!place.currentOpeningHours) return null;
   return {
-    openNow: current?.openNow ?? regular?.openNow ?? false,
-    periods,
-    weekdayDescriptions,
-  };
-}
-
-/** Prefer weekly descriptions / periods from whichever side has them. */
-export function mergeOpeningHours(
-  incoming: OpeningHours | null,
-  existing: OpeningHours | null | undefined,
-): OpeningHours | null {
-  const next = stripHoursUnavailableStub(incoming);
-  const prev = stripHoursUnavailableStub(existing ?? null);
-  if (!next) return prev;
-  if (!prev) return next;
-
-  const weekly = hasRealOpeningHours(next)
-    ? next.weekdayDescriptions
-    : prev.weekdayDescriptions;
-  const periods =
-    (next.periods?.length ?? 0) > 0 ? next.periods : (prev.periods ?? []);
-
-  if (!usableWeekdayDescriptions({
-    openNow: false,
-    periods,
-    weekdayDescriptions: weekly ?? [],
-  }).length && periods.length === 0) {
-    return null;
-  }
-
-  return {
-    openNow: next.openNow,
-    periods,
-    weekdayDescriptions: weekly ?? [],
+    openNow: place.currentOpeningHours.openNow,
+    periods: place.currentOpeningHours.periods,
+    weekdayDescriptions: place.currentOpeningHours.weekdayDescriptions,
   };
 }
 
@@ -306,10 +235,7 @@ export function mapPlaceToRow(
     lng: place.location?.longitude ?? existing?.lng ?? 0,
     address: place.formattedAddress ?? existing?.address ?? null,
     photos,
-    opening_hours: mergeOpeningHours(
-      mapOpeningHours(place),
-      existing?.opening_hours ?? null,
-    ),
+    opening_hours: mapOpeningHours(place) ?? existing?.opening_hours ?? null,
     primary_type: place.primaryType ?? existing?.primary_type ?? null,
     vibe_tags: (() => {
       const tags = deriveVibeTags(place);
@@ -330,9 +256,7 @@ async function fetchPlaceDetails(
   fieldMask: string = DETAILS_FULL_FIELD_MASK,
 ): Promise<GooglePlacesPlace | null> {
   const resourceId = toPlaceResourceId(placeId);
-  const url = new URL(`${GOOGLE_PLACES_BASE}/places/${resourceId}`);
-  url.searchParams.set("languageCode", "ja");
-  const res = await fetch(url, {
+  const res = await fetch(`${GOOGLE_PLACES_BASE}/places/${resourceId}`, {
     headers: {
       "X-Goog-Api-Key": getApiKey(),
       "X-Goog-FieldMask": fieldMask,

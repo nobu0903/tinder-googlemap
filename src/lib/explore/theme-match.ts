@@ -53,6 +53,7 @@ function scoreSoftMatch(row: SpotRow, tag: string): number {
       return 0;
     }
     case "late-night": {
+      // Soft fallback only — explicit vibe_tags already scored in themeMatchScore
       return (row.vibe_tags ?? []).includes("late-night") ? 100 : 0;
     }
     default:

@@ -15,15 +15,10 @@ import { useSwipeFeed } from "@/lib/hooks/use-swipe-feed";
 import { useAuth } from "@/lib/hooks/use-auth";
 import { useLocation } from "@/lib/hooks/use-location";
 import { useFreeSwipeQuota } from "@/lib/hooks/use-free-swipe-quota";
-import {
-  loadLocationSession,
-  saveLocationLabel,
-} from "@/lib/location/location-session";
 import { buildLoginPath } from "@/lib/auth/safe-redirect";
 import { EXPLORE_THEMES } from "@/lib/explore-mock";
 import { useLang } from "@/lib/i18n/context";
 import { translations } from "@/lib/i18n/translations";
-import { coverPhotoUrl, preloadPhotoUrls } from "@/lib/photos/preload";
 import {
   feedItemKey,
   isFeedNativeAd,
@@ -44,14 +39,9 @@ export function SwipeScreen() {
   const { coords, status, setManualCoords } = useLocation();
   const { used, limit, isLimitReached, consume } = useFreeSwipeQuota();
   const { t, lang } = useLang();
-  const [locationLabel, setLocationLabel] = useState<string | null>(() => {
-    if (labelParam) return labelParam;
-    return loadLocationSession()?.label ?? null;
-  });
-
-  useEffect(() => {
-    saveLocationLabel(locationLabel);
-  }, [locationLabel]);
+  const [locationLabel, setLocationLabel] = useState<string | null>(
+    labelParam ?? null,
+  );
   const [moreInfoOpen, setMoreInfoOpen] = useState(false);
   const [pickingLocation, setPickingLocation] = useState(false);
   const swipeTriggerRef = useRef<((action: SwipeAction) => void) | null>(null);
@@ -92,7 +82,6 @@ export function SwipeScreen() {
 
   const {
     currentItem,
-    nextItem,
     isInitialLoading,
     isRefetching,
     error,
@@ -104,14 +93,6 @@ export function SwipeScreen() {
     coords,
     enabled: feedEnabled,
   });
-
-  // Prefetch next card cover only — same /api/photo URL as unoptimized <Image>,
-  // so browser cache absorbs the second hit (no double Place Photo billing).
-  useEffect(() => {
-    if (!nextItem || isFeedNativeAd(nextItem)) return;
-    const url = coverPhotoUrl(nextItem);
-    if (url) preloadPhotoUrls([url]);
-  }, [nextItem]);
 
   const handleSwipe = (action: SwipeAction) => {
     if (!currentItem) return;

@@ -47,6 +47,7 @@ function checkRateLimit(ip: string): { allowed: boolean; remaining: number } {
   }
 
   if (entry.count >= RATE_LIMIT_PER_WINDOW) {
+    const retryAfterMs = RATE_WINDOW_MS - (now - entry.windowStart);
     return { allowed: false, remaining: 0 };
   }
 

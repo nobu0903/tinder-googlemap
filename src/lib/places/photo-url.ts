@@ -52,11 +52,10 @@ export function stripPhotoApiKey(url: string): string {
 /**
  * Client-facing photo URL (same-origin proxy). Never includes GOOGLE_PLACES_API_KEY.
  * Non-Places URLs are returned key-stripped as a safe fallback.
- * Default width matches swipe card display (~480), not the old 800px Google default.
  */
 export function toClientPhotoUrl(
   storedUrlOrName: string,
-  maxWidthPx = 480,
+  maxWidthPx = 800,
 ): string {
   const name = extractPlacesPhotoName(storedUrlOrName);
   if (!name) return stripPhotoApiKey(storedUrlOrName);

@@ -4,7 +4,6 @@ import {
   DETAILS_PHOTOS_FIELD_MASK,
   detailsFieldMask,
   feedSpotNeedsHydrate,
-  hasRealOpeningHours,
   HOURS_UNAVAILABLE_STUB,
   isBookingPipelineDone,
   needsDetailsEnrichment,
@@ -162,7 +161,6 @@ describe("feedSpotNeedsHydrate", () => {
         bookingUrl: null,
         bookingResolved: false,
         weekdayDescriptions: ["Monday: 11 AM – 10 PM"],
-        hoursFromGoogle: true,
         address: "Tokyo",
       }),
     ).toBe(true);
@@ -175,7 +173,6 @@ describe("feedSpotNeedsHydrate", () => {
         bookingUrl: null,
         bookingResolved: true,
         weekdayDescriptions: [],
-        hoursFromGoogle: false,
         address: "Tokyo",
       }),
     ).toBe(true);
@@ -185,21 +182,7 @@ describe("feedSpotNeedsHydrate", () => {
         bookingUrl: null,
         bookingResolved: true,
         weekdayDescriptions: ["Monday: 11 AM – 10 PM"],
-        hoursFromGoogle: true,
         address: null,
-      }),
-    ).toBe(true);
-  });
-
-  it("requests hydrate when weekly lines are synthesized (not from Google)", () => {
-    expect(
-      feedSpotNeedsHydrate({
-        photoCount: 3,
-        bookingUrl: null,
-        bookingResolved: true,
-        weekdayDescriptions: ["月曜日: 11:00～22:00"],
-        hoursFromGoogle: false,
-        address: "Tokyo",
       }),
     ).toBe(true);
   });
@@ -211,7 +194,6 @@ describe("feedSpotNeedsHydrate", () => {
         bookingUrl: null,
         bookingResolved: true,
         weekdayDescriptions: ["Monday: 11 AM – 10 PM"],
-        hoursFromGoogle: true,
         address: "Tokyo",
       }),
     ).toBe(false);
@@ -227,56 +209,5 @@ describe("stripHoursUnavailableStub", () => {
         weekdayDescriptions: [HOURS_UNAVAILABLE_STUB],
       }),
     ).toBeNull();
-  });
-});
-
-describe("hasRealOpeningHours", () => {
-  it("requires weekdayDescriptions — periods alone are not enough", () => {
-    expect(
-      hasRealOpeningHours({
-        openNow: true,
-        periods: [
-          {
-            open: { day: 1, hour: 11, minute: 0 },
-            close: { day: 1, hour: 22, minute: 0 },
-          },
-        ],
-        weekdayDescriptions: [],
-      }),
-    ).toBe(false);
-  });
-
-  it("is true when weekly lines exist", () => {
-    expect(
-      hasRealOpeningHours({
-        openNow: true,
-        periods: [],
-        weekdayDescriptions: ["月曜日: 11:00～22:00"],
-      }),
-    ).toBe(true);
-  });
-
-  it("still needs Details when periods exist but weekly lines missing", () => {
-    const row = baseRow({
-      address: "1-1 Chiyoda, Tokyo",
-      photos: [
-        { url: "a", width: 1, height: 1 },
-        { url: "b", width: 1, height: 1 },
-        { url: "c", width: 1, height: 1 },
-      ],
-      hotpepper_url: "",
-      opening_hours: {
-        openNow: true,
-        periods: [
-          {
-            open: { day: 1, hour: 11, minute: 0 },
-            close: { day: 1, hour: 22, minute: 0 },
-          },
-        ],
-        weekdayDescriptions: [],
-      },
-    });
-    expect(needsDetailsEnrichment(row)).toBe(true);
-    expect(detailsFieldMask(row)).toBe(DETAILS_FULL_FIELD_MASK);
   });
 });

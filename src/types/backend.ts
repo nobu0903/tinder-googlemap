@@ -81,7 +81,7 @@ export const COLLECTION_CARD_PHOTO_WIDTH = 400;
 
 /**
  * Swipe card photo maxWidthPx for Google Place Photo / `/api/photo`.
- * Cards are ~400 CSS px; 480 covers light retina without the old 800px payload.
+ * Kept from main product tuning; feed selection algorithm is independent.
  */
 export const SWIPE_CARD_PHOTO_WIDTH = 480;
 
@@ -142,8 +142,6 @@ export interface FeedSpot {
   priceLevel: number | null;
   /** Price string formatted from priceLevel, e.g. "¥¥" */
   priceLabel: string;
-  lat: number;
-  lng: number;
   distanceKm: number;
   isOpen: boolean;
   todayClose: string | null;
@@ -154,15 +152,8 @@ export interface FeedSpot {
   photos: FeedPhoto[];
   vibeTags: string[];
   address: string | null;
-  /** Display lines for the weekly hours table (Google text or periods fallback) */
+  /** Google weekday descriptions, e.g. "Monday: 11:00 AM – 10:00 PM" */
   weekdayDescriptions: string[];
-  /** Raw periods — UI fallback when weekdayDescriptions is still empty */
-  openingPeriods: OpeningHoursPeriod[];
-  /**
-   * True when weekdayDescriptions came from Google (not client-side synthesis).
-   * False → client should still call Place Details hydrate for real weekly text.
-   */
-  hoursFromGoogle: boolean;
   /**
    * Final resolved booking URL surfaced to the UI.
    * Tier 1: ValueCommerce-wrapped Hotpepper link (affiliate revenue)
@@ -211,7 +202,7 @@ export interface SwipeFeedParams {
 
 export interface SwipeFeedResponse {
   spots: SwipeFeedItem[];
-  /** Search radius actually used (km) — may be 2, 3, 5, or 10 after auto-expansion */
+  /** Search radius actually used (km) — may be 2, 5, or 10 after auto-expansion */
   radiusKm: number;
   /**
    * Number of vibe-pool spots that passed all filters for the requested tag.
@@ -256,13 +247,13 @@ export interface GooglePlacesPhoto {
 
 export interface GooglePlacesPeriod {
   open: { day: number; hour: number; minute: number };
-  close?: { day: number; hour: number; minute: number };
+  close: { day: number; hour: number; minute: number };
 }
 
 export interface GooglePlacesOpeningHours {
-  openNow?: boolean;
-  periods?: GooglePlacesPeriod[];
-  weekdayDescriptions?: string[];
+  openNow: boolean;
+  periods: GooglePlacesPeriod[];
+  weekdayDescriptions: string[];
 }
 
 export interface GooglePlacesPlace {
@@ -275,10 +266,7 @@ export interface GooglePlacesPlace {
   primaryType?: string;
   types?: string[];
   photos?: GooglePlacesPhoto[];
-  /** Next 7 days (may omit localized weekday text) */
   currentOpeningHours?: GooglePlacesOpeningHours;
-  /** Typical weekly schedule — preferred source for weekdayDescriptions */
-  regularOpeningHours?: GooglePlacesOpeningHours;
   location?: { latitude: number; longitude: number };
   /** National-format phone number, e.g. "03-1234-5678" (Advanced field) */
   nationalPhoneNumber?: string;

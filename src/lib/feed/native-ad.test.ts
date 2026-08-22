@@ -25,7 +25,7 @@ function fakeSpot(i: number): FeedSpot {
     mapsUrl: "",
     bookingUrl: null,
     editorialSummary: null,
-  } as FeedSpot;
+  } as unknown as FeedSpot;
 }
 
 describe("injectNativeAd", () => {

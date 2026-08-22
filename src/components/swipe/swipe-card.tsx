@@ -36,8 +36,8 @@ interface SwipeCardProps {
 
 
 // Reduced from 2 → 1 to limit rendered <Image> components per card.
-// Prefetch uses the same /api/photo URL (unoptimized Image) so browser cache
-// absorbs duplicates — Place Photo is billed once per unique URL.
+// Each rendered photo = 1 Google Place Photo API call ($0.007); prefetching
+// 2 pages ahead was loading photos the user might never reach.
 const PREFETCH_AHEAD = 1;
 
 
@@ -102,7 +102,6 @@ function PhotoSlot({ photo, priority = false }: PhotoSlotProps) {
         alt={photo.alt}
         fill
         priority={priority}
-        unoptimized
         sizes="(max-width: 400px) 100vw, 400px"
         className="object-cover object-center"
       />

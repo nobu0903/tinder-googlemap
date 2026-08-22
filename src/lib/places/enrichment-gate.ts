@@ -15,7 +15,6 @@ export const DETAILS_FULL_FIELD_MASK = [
   "primaryType",
   "photos",
   "currentOpeningHours",
-  "regularOpeningHours",
   "location",
   "nationalPhoneNumber",
   "reservationUri",
@@ -48,25 +47,14 @@ export function stripHoursUnavailableStub(
   return hours;
 }
 
-/** Non-empty weekday lines suitable for the weekly hours UI (not stub/blank). */
-export function usableWeekdayDescriptions(
-  hours: OpeningHours | null | undefined,
-): string[] {
-  if (!hours || isHoursUnavailableStub(hours)) return [];
-  return (hours.weekdayDescriptions ?? []).filter(
-    (line) => line.trim().length > 0 && line !== HOURS_UNAVAILABLE_STUB,
-  );
-}
-
-/**
- * True when weekly hours are displayable.
- * `periods` alone is NOT enough — more-info only renders weekdayDescriptions,
- * and Search often returns periods without localized weekly lines.
- */
 export function hasRealOpeningHours(
   hours: OpeningHours | null | undefined,
 ): boolean {
-  return usableWeekdayDescriptions(hours).length > 0;
+  if (!hours || isHoursUnavailableStub(hours)) return false;
+  return (
+    (hours.weekdayDescriptions?.length ?? 0) > 0 ||
+    (hours.periods?.length ?? 0) > 0
+  );
 }
 
 /**
@@ -123,12 +111,9 @@ export function feedSpotNeedsHydrate(spot: {
   /** Server set after resolveBookingUrl (even when no bookable URL) */
   bookingResolved: boolean;
   weekdayDescriptions: string[];
-  /** False/undefined → still need Details for Google weekly hours */
-  hoursFromGoogle?: boolean;
   address?: string | null;
 }): boolean {
   if (spot.photoCount < MIN_PHOTOS_SKIP_DETAILS) return true;
-  if (!spot.hoursFromGoogle) return true;
   if (!spot.weekdayDescriptions?.length) return true;
   if (!spot.address) return true;
   if (spot.bookingResolved) return false;

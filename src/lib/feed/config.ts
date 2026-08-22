@@ -19,12 +19,12 @@ export interface FeedAlgorithmConfig {
 export type AreaProfile = "tourist" | "urban" | "local";
 
 /**
- * Review bands scale with *cached density* near the user (not city name).
- * Probe: how many spots nearby have ≥1000 / ≥2000 reviews → local | urban | tourist.
+ * Review bands scale with city density so "hidden gem" means the same
+ * relative thing in Sapporo (local) and Tokyo (tourist).
  *
- * local:   vibe 60–400,  classic 401–1200  (Sapporo-scale; was 300/800 — too tight)
- * urban:   vibe 60–700,  classic 701–1500
- * tourist: vibe 60–1000, classic 1001–2500
+ * local:   vibe 60–300,  classic 301–800
+ * urban:   vibe 60–600,  classic 601–1200
+ * tourist: vibe 60–1000, classic 1001–2000
  */
 export const AREA_GEM_BANDS: Record<
   AreaProfile,
@@ -34,37 +34,21 @@ export const AREA_GEM_BANDS: Record<
   >
 > = {
   local: {
-    vibeMaxReviews: 400,
-    classicMinReviews: 401,
-    classicMaxReviews: 1_200,
+    vibeMaxReviews: 300,
+    classicMinReviews: 301,
+    classicMaxReviews: 800,
   },
   urban: {
-    vibeMaxReviews: 700,
-    classicMinReviews: 701,
-    classicMaxReviews: 1_500,
+    vibeMaxReviews: 600,
+    classicMinReviews: 601,
+    classicMaxReviews: 1_200,
   },
   tourist: {
     vibeMaxReviews: 1_000,
     classicMinReviews: 1_001,
-    classicMaxReviews: 2_500,
+    classicMaxReviews: 2_000,
   },
 };
-
-/**
- * Last-resort bands when the radius ladder still cannot fill a feed page.
- * Keeps vibeMinReviews; widens caps so mid-famous locals can appear.
- */
-export function applyStarvationRelaxation(
-  config: FeedAlgorithmConfig,
-): FeedAlgorithmConfig {
-  return {
-    ...config,
-    vibeMaxReviews: Math.max(config.vibeMaxReviews, 800),
-    classicMinReviews: Math.min(config.classicMinReviews, 401),
-    classicMaxReviews: Math.max(config.classicMaxReviews, 2_500),
-    minEligibleSpots: Math.min(config.minEligibleSpots, 8),
-  };
-}
 
 const AREA_PROFILE_RANK: Record<AreaProfile, number> = {
   local: 0,
@@ -112,19 +96,17 @@ export function withoutAreaBandOverrides(
  * Dense cities raise vibeMax via applyAreaGemBands at request time.
  */
 export const DEFAULT_FEED_CONFIG: FeedAlgorithmConfig = {
-  classicMinReviews: 401,
-  classicMaxReviews: 1_200,
+  classicMinReviews: 301,
+  classicMaxReviews: 800,
   vibeMinReviews: 60,
-  vibeMaxReviews: 400,
+  vibeMaxReviews: 300,
   classicMegaReviewThreshold: 5_000,
   classicSlotsPerCycle: 3,
   vibeSlotsPerCycle: 7,
-  /** 2km → 3km → 5km → 10km (production uses the full ladder when pool is thin) */
-  radiusStepsM: [2_000, 3_000, 5_000, 10_000],
+  radiusStepsM: [2_000, 5_000, 10_000],
   minEligibleSpots: 20,
-  /** Match free-tier daily swipe cap so we don't over-fetch unused cards */
-  feedBatchSize: 10,
-}
+  feedBatchSize: 20,
+};
 
 let runtimeConfig: FeedAlgorithmConfig = { ...DEFAULT_FEED_CONFIG };
 
