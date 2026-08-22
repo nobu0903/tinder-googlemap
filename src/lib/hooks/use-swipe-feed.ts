@@ -10,6 +10,11 @@ import {
 } from "@/types/backend";
 import type { Coordinates } from "@/lib/hooks/use-location";
 import { feedSpotNeedsHydrate } from "@/lib/places/enrichment-gate";
+import {
+  runSwipeFetchExclusive,
+  swipeFetchKey,
+} from "@/lib/feed/swipe-fetch-lock";
+import { openCurrentNativeAd } from "@/lib/ads/native-ad-opener";
 
 /** Refetch only when the queue is fully exhausted */
 const REFETCH_WHEN_EMPTY = true;
@@ -187,42 +192,53 @@ export function useSwipeFeed({
     else setIsInitialLoading(true);
     setError(null);
 
+    const lockKey = swipeFetchKey(
+      currentCoords.lat,
+      currentCoords.lng,
+      tagRef.current,
+    );
+
     try {
-      const url = new URL("/api/swipe", window.location.origin);
-      url.searchParams.set("lat", String(currentCoords.lat));
-      url.searchParams.set("lng", String(currentCoords.lng));
-      if (tagRef.current) url.searchParams.set("tag", tagRef.current);
+      // Strict Mode remounts reset instance refs; share one in-flight fetch + result.
+      const result = await runSwipeFetchExclusive(lockKey, async () => {
+        const url = new URL("/api/swipe", window.location.origin);
+        url.searchParams.set("lat", String(currentCoords.lat));
+        url.searchParams.set("lng", String(currentCoords.lng));
+        if (tagRef.current) url.searchParams.set("tag", tagRef.current);
 
-      const exclude = [...seenSpotIdsRef.current].slice(-100);
-      if (exclude.length > 0) {
-        url.searchParams.set("exclude", exclude.join(","));
-      }
+        const exclude = [...seenSpotIdsRef.current].slice(-100);
+        if (exclude.length > 0) {
+          url.searchParams.set("exclude", exclude.join(","));
+        }
 
-      const headers: HeadersInit = {};
-      if (accessTokenRef.current) {
-        headers["Authorization"] = `Bearer ${accessTokenRef.current}`;
-      }
+        const headers: HeadersInit = {};
+        if (accessTokenRef.current) {
+          headers.Authorization = `Bearer ${accessTokenRef.current}`;
+        }
 
-      const res = await fetch(url.toString(), { headers });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(
-          (body as { error?: string }).error ?? `Feed API error: ${res.status}`,
-        );
-      }
+        const res = await fetch(url.toString(), { headers });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(
+            (body as { error?: string }).error ??
+              `Feed API error: ${res.status}`,
+          );
+        }
 
-      const data = await res.json();
-      const newItems: SwipeFeedItem[] = data.spots ?? [];
+        const data = await res.json();
+        const newItems: SwipeFeedItem[] = data.spots ?? [];
+        const vibeCount =
+          typeof data.vibeSpotCount === "number" ? data.vibeSpotCount : null;
+        return { newItems, vibeCount };
+      });
 
-      // Track sparse themed feeds so the UI can show a warning banner
-      const vibeCount = typeof data.vibeSpotCount === "number" ? data.vibeSpotCount : null;
-      if (vibeCount !== null && tagRef.current) {
-        setIsSparseTheme(vibeCount < 6);
+      if (result.vibeCount !== null && tagRef.current) {
+        setIsSparseTheme(result.vibeCount < 6);
       }
 
       setQueue((prev) => {
         const inQueue = new Set(prev.map(feedItemKey));
-        const fresh = newItems.filter((item) => {
+        const fresh = result.newItems.filter((item) => {
           const key = feedItemKey(item);
           if (isFeedNativeAd(item)) return !inQueue.has(key);
           return !seenSpotIdsRef.current.has(key) && !inQueue.has(key);
@@ -257,6 +273,7 @@ export function useSwipeFeed({
 
   // Trigger effect: only re-runs when queue length, enabled flag, or coords change.
   // fetchFeed is intentionally NOT a dependency — we access it via fetchFeedRef.
+  // Use coordsKey (not coords object) so GPS noise / new object identity does not double-fetch.
   useEffect(() => {
     if (!enabled || !coords) return;
     const shouldFetch = REFETCH_WHEN_EMPTY
@@ -266,7 +283,7 @@ export function useSwipeFeed({
       void fetchFeedRef.current();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queue.length, enabled, coords]);
+  }, [queue.length, enabled, coordsKey]);
 
   const advance = useCallback(() => {
     setQueue((prev) => {
@@ -284,6 +301,9 @@ export function useSwipeFeed({
       if (!item) return;
 
       if (isFeedNativeAd(item)) {
+        if (action === "like") {
+          openCurrentNativeAd();
+        }
         advance();
         return;
       }

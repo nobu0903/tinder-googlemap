@@ -2,6 +2,10 @@
 
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
+import {
+  clickNativeAdRoot,
+  registerNativeAdOpener,
+} from "@/lib/ads/native-ad-opener";
 import type { FeedNativeAd } from "@/types/backend";
 
 interface NativeAdCardProps {
@@ -15,23 +19,35 @@ declare global {
   }
 }
 
+/**
+ * Display ad unit (AdSense snippet: format=auto, full-width-responsive).
+ * Registers an opener so a right-swipe (like) can forward a click into the ad.
+ */
 export function NativeAdCard({ ad, className }: NativeAdCardProps) {
-  const insRef = useRef<HTMLModElement>(null);
+  const rootRef = useRef<HTMLElement>(null);
+  const pushedRef = useRef(false);
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_ADSENSE_CLIENT_ID;
   const slotId = process.env.NEXT_PUBLIC_GOOGLE_ADSENSE_SLOT_ID;
   const canRenderAd = Boolean(clientId && slotId);
 
   useEffect(() => {
-    if (!canRenderAd || !insRef.current) return;
+    if (!canRenderAd || pushedRef.current) return;
+    pushedRef.current = true;
     try {
       (window.adsbygoogle = window.adsbygoogle || []).push({});
     } catch {
-      // AdSense not loaded yet — placeholder remains visible
+      pushedRef.current = false;
     }
   }, [canRenderAd]);
 
+  useEffect(() => {
+    registerNativeAdOpener(() => clickNativeAdRoot(rootRef.current));
+    return () => registerNativeAdOpener(null);
+  }, [ad.id]);
+
   return (
     <article
+      ref={rootRef}
       className={cn(
         "relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-white/10 bg-surface-elevated shadow-card",
         className,
@@ -45,12 +61,11 @@ export function NativeAdCard({ ad, className }: NativeAdCardProps) {
 
         {canRenderAd ? (
           <ins
-            ref={insRef}
-            className="adsbygoogle block w-full min-h-[280px]"
-            style={{ display: "block" }}
+            className="adsbygoogle w-full"
+            style={{ display: "block", minHeight: 280 }}
             data-ad-client={clientId}
             data-ad-slot={slotId}
-            data-ad-format="fluid"
+            data-ad-format="auto"
             data-full-width-responsive="true"
           />
         ) : (

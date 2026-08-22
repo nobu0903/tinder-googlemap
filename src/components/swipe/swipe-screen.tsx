@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MobileShell } from "@/components/layout/mobile-shell";
 import { BottomNav } from "@/components/layout/bottom-nav";
+import { WaitlistHeaderButton } from "@/components/waitlist/waitlist-header-button";
 import { SwipeCard } from "@/components/swipe/swipe-card";
 import { NativeAdCard } from "@/components/swipe/native-ad-card";
 import { SwipeActions } from "@/components/swipe/swipe-actions";
@@ -154,7 +155,8 @@ export function SwipeScreen() {
   return (
     <MobileShell>
       <main className="flex min-h-0 flex-1 flex-col px-4 pb-28 pt-6">
-        <header className="mb-4 flex shrink-0 flex-col items-center">
+        <header className="relative mb-4 flex shrink-0 flex-col items-center">
+          <WaitlistHeaderButton className="absolute right-0 top-0" />
           <h1 className="text-sm font-bold tracking-[0.18em] text-electric-chilli drop-shadow-[0_0_8px_rgba(224,62,0,0.25)]">
             🔥 {t("nav.swipe")}
           </h1>

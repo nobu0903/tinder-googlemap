@@ -39,3 +39,56 @@
     @apply bg-midnight text-text-primary antialiased;
   }
 }
+
+/* ── Landing page (/lp) polish ───────────────────────────────────────────── */
+.lp-root {
+  --lp-accent: #dc7a2e;
+  --lp-accent-soft: rgba(220, 122, 46, 0.16);
+}
+
+.lp-root .lp-display {
+  font-family: var(--font-lp-display), var(--font-lp-body), ui-sans-serif, system-ui,
+    sans-serif;
+  letter-spacing: 0.02em;
+}
+
+.lp-root .lp-float {
+  animation: lp-float 7s ease-in-out infinite;
+}
+
+.lp-root .lp-fade-in {
+  animation: lp-fade-in 0.9s ease both;
+}
+
+.lp-root .lp-fade-in-delay {
+  animation: lp-fade-in 0.9s ease 0.15s both;
+}
+
+@keyframes lp-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
+}
+
+@keyframes lp-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-root .lp-float,
+  .lp-root .lp-fade-in,
+  .lp-root .lp-fade-in-delay {
+    animation: none;
+  }
+}

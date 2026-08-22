@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { ExternalLink, Globe, LogOut, Zap } from "lucide-react";
+import { Globe, LogOut, MessageSquare, Zap } from "lucide-react";
 import { MobileShell } from "@/components/layout/mobile-shell";
 import { BottomNav } from "@/components/layout/bottom-nav";
+import { WaitlistHeaderButton } from "@/components/waitlist/waitlist-header-button";
 import {
   SettingsRowButton,
-  SettingsRowExternalLink,
   SettingsRowInfo,
   SettingsRowLink,
   SettingsSection,
@@ -22,8 +22,6 @@ import { useLang } from "@/lib/i18n/context";
 import type { Lang } from "@/lib/i18n/translations";
 
 const APP_VERSION = "0.1.0";
-/** Set NEXT_PUBLIC_FEEDBACK_URL to show the feedback row. */
-const FEEDBACK_URL = process.env.NEXT_PUBLIC_FEEDBACK_URL?.trim() ?? "";
 
 export function SettingsScreen() {
   const { user, isLoading, signOut } = useAuth();
@@ -33,7 +31,8 @@ export function SettingsScreen() {
 
   return (
     <MobileShell>
-      <header className="shrink-0 border-b border-white/8 px-5 pb-3 pt-5">
+      <header className="relative shrink-0 border-b border-white/8 px-5 pb-3 pt-5">
+        <WaitlistHeaderButton className="absolute right-5 top-5" />
         <p className="text-[11px] font-bold tracking-[0.18em] text-electric-chilli">
           VIBELOOP
         </p>
@@ -97,13 +96,11 @@ export function SettingsScreen() {
         </SettingsSection>
 
         <SettingsSection label={t("settings.more")}>
-          {FEEDBACK_URL ? (
-            <SettingsRowExternalLink
-              label={t("settings.sendFeedback")}
-              icon={<ExternalLink className="size-4 text-text-muted" />}
-              href={FEEDBACK_URL}
-            />
-          ) : null}
+          <SettingsRowLink
+            label={t("settings.sendFeedback")}
+            icon={<MessageSquare className="size-4 text-text-muted" />}
+            href="/feedback"
+          />
         </SettingsSection>
 
         <p className="mt-6 px-5 text-center text-[10px] text-neutral-700">

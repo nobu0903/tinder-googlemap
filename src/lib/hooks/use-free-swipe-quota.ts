@@ -2,53 +2,91 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
-/** Absolute free-tier swipe cap (not per location). */
-export const FREE_SWIPE_LIMIT = 100;
+/** Free swipes allowed per Tokyo calendar day. */
+export const FREE_SWIPE_LIMIT = 10;
 
-/** Canonical key (correct spelling). */
-const STORAGE_KEY = "vibeloop:free-swipe-count";
-/** Legacy typo key from early builds — migrated on read. */
-const LEGACY_STORAGE_KEY = "vibelooop:free-swipe-count";
+/** Canonical key (v2 daily quota). */
+const STORAGE_KEY = "vibeloop:free-swipe-daily-v2";
+/** Previous absolute-count key — ignored after daily model (fresh start). */
+const LEGACY_ABSOLUTE_KEY = "vibeloop:free-swipe-count";
+const LEGACY_TYPO_KEY = "vibelooop:free-swipe-count";
 
 const listeners = new Set<() => void>();
+
+/** Cached server snapshot — must be referentially stable. */
+const SERVER_SNAPSHOT = 0;
 
 function emitChange() {
   for (const listener of listeners) listener();
 }
 
-function migrateLegacyKey(): void {
-  if (typeof window === "undefined") return;
+/** YYYY-MM-DD in Asia/Tokyo. */
+export function tokyoDayKey(now = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
+interface DailyRecord {
+  day: string;
+  count: number;
+}
+
+function parseRecord(raw: string | null): DailyRecord | null {
+  if (!raw) return null;
   try {
-    if (localStorage.getItem(STORAGE_KEY) != null) return;
-    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (legacy == null) return;
-    localStorage.setItem(STORAGE_KEY, legacy);
-    localStorage.removeItem(LEGACY_STORAGE_KEY);
+    const parsed = JSON.parse(raw) as Partial<DailyRecord>;
+    if (
+      typeof parsed.day === "string" &&
+      typeof parsed.count === "number" &&
+      Number.isFinite(parsed.count)
+    ) {
+      return {
+        day: parsed.day,
+        count: Math.min(
+          FREE_SWIPE_LIMIT,
+          Math.max(0, Math.floor(parsed.count)),
+        ),
+      };
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function clearLegacyKeys(): void {
+  try {
+    localStorage.removeItem(LEGACY_ABSOLUTE_KEY);
+    localStorage.removeItem(LEGACY_TYPO_KEY);
   } catch {
     // ignore
   }
 }
 
-function readStored(): number {
+/** Returns today's used count (0 if missing / other day). Primitive for stable snapshots. */
+function readUsedCount(): number {
   if (typeof window === "undefined") return 0;
   try {
-    migrateLegacyKey();
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return 0;
-    const count = Number(raw);
-    if (!Number.isFinite(count)) return 0;
-    return Math.min(FREE_SWIPE_LIMIT, Math.max(0, Math.floor(count)));
+    clearLegacyKeys();
+    const today = tokyoDayKey();
+    const record = parseRecord(localStorage.getItem(STORAGE_KEY));
+    if (!record || record.day !== today) return 0;
+    return record.count;
   } catch {
     return 0;
   }
 }
 
-function writeStored(count: number) {
+function writeUsedCount(count: number) {
   if (typeof window === "undefined") return;
-  migrateLegacyKey();
+  const capped = Math.min(FREE_SWIPE_LIMIT, Math.max(0, count));
   localStorage.setItem(
     STORAGE_KEY,
-    String(Math.min(FREE_SWIPE_LIMIT, Math.max(0, count))),
+    JSON.stringify({ day: tokyoDayKey(), count: capped }),
   );
   emitChange();
 }
@@ -56,11 +94,7 @@ function writeStored(count: number) {
 function subscribe(onStoreChange: () => void) {
   listeners.add(onStoreChange);
   const onStorage = (event: StorageEvent) => {
-    if (
-      event.key === STORAGE_KEY ||
-      event.key === LEGACY_STORAGE_KEY ||
-      event.key === null
-    ) {
+    if (event.key === STORAGE_KEY || event.key === null) {
       onStoreChange();
     }
   };
@@ -71,8 +105,7 @@ function subscribe(onStoreChange: () => void) {
   };
 }
 
-function subscribeIsClient(onStoreChange: () => void) {
-  void onStoreChange;
+function subscribeIsClient(_onStoreChange: () => void) {
   return () => {};
 }
 
@@ -85,8 +118,8 @@ interface UseFreeSwipeQuotaReturn {
 }
 
 /**
- * Free-tier swipe counter. Absolute across all locations —
- * changing area does NOT reset the count.
+ * Free-tier swipe counter — 10 swipes per Asia/Tokyo calendar day.
+ * Resets at Tokyo midnight (00:00 JST).
  */
 export function useFreeSwipeQuota(): UseFreeSwipeQuotaReturn {
   const isClient = useSyncExternalStore(
@@ -94,13 +127,17 @@ export function useFreeSwipeQuota(): UseFreeSwipeQuotaReturn {
     () => true,
     () => false,
   );
-  const used = useSyncExternalStore(subscribe, readStored, () => 0);
+  const used = useSyncExternalStore(
+    subscribe,
+    readUsedCount,
+    () => SERVER_SNAPSHOT,
+  );
 
   const consume = useCallback(() => {
     if (!isClient) return;
-    const prev = readStored();
+    const prev = readUsedCount();
     if (prev >= FREE_SWIPE_LIMIT) return;
-    writeStored(prev + 1);
+    writeUsedCount(prev + 1);
   }, [isClient]);
 
   const safeUsed = isClient ? used : 0;

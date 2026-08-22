@@ -105,7 +105,8 @@ export interface FeedPhotoPage {
 
 /** In-feed native ad placeholder — injected by GET /api/swipe only */
 export interface FeedNativeAd {
-  id: "ad-slot-google-admob";
+  /** Unique per insertion, e.g. ad-slot-0 */
+  id: string;
   layoutType: "AD_NATIVE";
   name: "Sponsored";
 }
