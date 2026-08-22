@@ -166,6 +166,11 @@ export interface FeedSpot {
    * Client uses this to skip redundant /api/spots/hydrate calls.
    */
   bookingResolved: boolean;
+  /**
+   * True when cached Places photo media names are likely expired
+   * (based on spots.updated_at). Client should hydrate to refresh URLs.
+   */
+  photosNeedRefresh: boolean;
 }
 
 // ── Collection (liked spots) ──────────────────────────────────────────────────

@@ -81,9 +81,11 @@ interface PhotoSlotProps {
 
 
 function PhotoSlot({ photo, priority = false }: PhotoSlotProps) {
+  const [failed, setFailed] = useState(false);
+
   // Skeleton stays behind the image — never gate the <Image> on onLoad.
   // Cached Next/Image responses often skip a late onLoad; opacity-0 then stuck forever.
-  if (!photo?.url) {
+  if (!photo?.url || failed) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-text-muted">
         No photo available
@@ -106,6 +108,7 @@ function PhotoSlot({ photo, priority = false }: PhotoSlotProps) {
         // Proxied Places photos already include size via /api/photo — skip
         // /_next/image (avoids localPatterns 400 + double-fetch billing risk).
         unoptimized
+        onError={() => setFailed(true)}
         className="object-cover object-center"
       />
     </>

@@ -81,7 +81,10 @@ export function needsDetailsEnrichment(row: SpotRow | null): boolean {
   const needsBooking = !isBookingPipelineDone(row);
   const needsHoursOrAddress =
     !hasRealOpeningHours(row.opening_hours) || !row.address;
-  return needsPhotos || needsBooking || needsHoursOrAddress;
+  // Places photo media names expire — refresh Details periodically.
+  const needsPhotoRefresh =
+    photoCount(row) > 0 && spotPhotosNeedRefresh(row.updated_at);
+  return needsPhotos || needsBooking || needsHoursOrAddress || needsPhotoRefresh;
 }
 
 /**
@@ -99,6 +102,9 @@ export function detailsFieldMask(row: SpotRow | null): string {
   if (photoCount(row) < MIN_PHOTOS_SKIP_DETAILS) {
     return DETAILS_PHOTOS_FIELD_MASK;
   }
+  if (spotPhotosNeedRefresh(row.updated_at)) {
+    return DETAILS_PHOTOS_FIELD_MASK;
+  }
   return DETAILS_FULL_FIELD_MASK;
 }
 
@@ -112,11 +118,27 @@ export function feedSpotNeedsHydrate(spot: {
   bookingResolved: boolean;
   weekdayDescriptions: string[];
   address?: string | null;
+  /** True when cached photo media names are likely expired */
+  photosNeedRefresh?: boolean;
 }): boolean {
+  if (spot.photosNeedRefresh) return true;
   if (spot.photoCount < MIN_PHOTOS_SKIP_DETAILS) return true;
   if (!spot.weekdayDescriptions?.length) return true;
   if (!spot.address) return true;
   if (spot.bookingResolved) return false;
   if (spot.bookingUrl) return false;
   return true;
+}
+
+/** Places photo resource names expire; refresh Details after this age. */
+export const PHOTO_MEDIA_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** True when spot.updated_at is missing or older than PHOTO_MEDIA_MAX_AGE_MS. */
+export function spotPhotosNeedRefresh(
+  updatedAt: string | null | undefined,
+): boolean {
+  if (!updatedAt) return true;
+  const t = Date.parse(updatedAt);
+  if (!Number.isFinite(t)) return true;
+  return Date.now() - t > PHOTO_MEDIA_MAX_AGE_MS;
 }

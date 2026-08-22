@@ -6,9 +6,9 @@ import { createIpRateLimiter, getClientIp } from "@/lib/api/rate-limit";
 const GOOGLE_PLACES_BASE = "https://places.googleapis.com/v1";
 const NAME_PATTERN = /^places\/[^/]+\/photos\/[^/]+$/;
 
-/** Photos are immutable per resource name — long browser/CDN cache is safe. */
+/** Browser/CDN cache for successful photo bytes (immutable per resource name). */
 const PHOTO_CACHE_CONTROL =
-  "public, max-age=2592000, immutable, stale-while-revalidate=604800";
+  "public, max-age=86400, stale-while-revalidate=604800";
 
 /** Cap unauthenticated photo proxy abuse (Places Photo billing). */
 const photoRateLimit = createIpRateLimiter({
@@ -20,6 +20,10 @@ const photoRateLimit = createIpRateLimiter({
  * GET /api/photo?name=places%2F...%2Fphotos%2F...&maxWidthPx=480
  * Proxies Google Place Photo media with the server API key.
  * Streams the upstream body (no full-buffer wait) for faster TTFB.
+ *
+ * Always fetches Google with cache: 'no-store' so expired photo names are not
+ * masked by a long-lived Next.js Data Cache (which made localhost look healthy
+ * while production returned 502).
  */
 export async function GET(req: NextRequest) {
   const ip = getClientIp(req);
@@ -54,7 +58,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Invalid photo name" }, { status: 400 });
   }
 
-  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+  const apiKey = process.env.GOOGLE_PLACES_API_KEY?.trim();
   if (!apiKey) {
     return NextResponse.json(
       { error: "Missing GOOGLE_PLACES_API_KEY" },
@@ -67,14 +71,21 @@ export async function GET(req: NextRequest) {
   try {
     const res = await fetch(upstream, {
       redirect: "follow",
-      next: { revalidate: 2592000 },
+      cache: "no-store",
     });
 
     if (!res.ok) {
       console.warn(`[GET /api/photo] upstream ${res.status} for ${name}`);
+      // Expired / invalid Places photo resource names → 404 (not 502).
+      if (res.status === 400 || res.status === 404) {
+        return NextResponse.json(
+          { error: "Photo unavailable", upstreamStatus: res.status },
+          { status: 404 },
+        );
+      }
       return NextResponse.json(
-        { error: "Photo fetch failed" },
-        { status: res.status === 404 ? 404 : 502 },
+        { error: "Photo fetch failed", upstreamStatus: res.status },
+        { status: 502 },
       );
     }
 

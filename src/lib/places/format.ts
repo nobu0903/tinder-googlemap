@@ -8,7 +8,10 @@ import type {
   OpeningHoursPeriod,
 } from "@/types/backend";
 import { MAX_STORED_PHOTOS, SWIPE_CARD_PHOTO_WIDTH } from "@/types/backend";
-import { stripHoursUnavailableStub } from "@/lib/places/enrichment-gate";
+import {
+  stripHoursUnavailableStub,
+  spotPhotosNeedRefresh,
+} from "@/lib/places/enrichment-gate";
 import { toClientPhotoUrl } from "@/lib/places/photo-url";
 
 /** Japan product — Google periods are local wall times; evaluate in Tokyo. */
@@ -313,6 +316,7 @@ export function rowToFeedSpot(
     weekdayDescriptions: hours?.weekdayDescriptions ?? [],
     bookingUrl: row.booking_url ?? null,
     bookingResolved,
+    photosNeedRefresh: spotPhotosNeedRefresh(row.updated_at),
   };
 }
 

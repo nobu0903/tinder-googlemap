@@ -7,6 +7,7 @@ import {
   HOURS_UNAVAILABLE_STUB,
   isBookingPipelineDone,
   needsDetailsEnrichment,
+  spotPhotosNeedRefresh,
   stripHoursUnavailableStub,
 } from "@/lib/places/enrichment-gate";
 import type { SpotRow } from "@/types/backend";
@@ -78,8 +79,29 @@ describe("needsDetailsEnrichment", () => {
         weekdayDescriptions: ["Monday: 11 AM – 10 PM"],
       },
       booking_url: "https://book.example",
+      updated_at: new Date().toISOString(),
     });
     expect(needsDetailsEnrichment(row)).toBe(false);
+  });
+
+  it("needs Details when photos look complete but updated_at is stale", () => {
+    const row = baseRow({
+      address: "1-1 Chiyoda, Tokyo",
+      photos: [
+        { url: "a", width: 1, height: 1 },
+        { url: "b", width: 1, height: 1 },
+        { url: "c", width: 1, height: 1 },
+      ],
+      opening_hours: {
+        openNow: true,
+        periods: [],
+        weekdayDescriptions: ["Monday: 11 AM – 10 PM"],
+      },
+      booking_url: "https://book.example",
+      updated_at: "2000-01-01T00:00:00.000Z",
+    });
+    expect(needsDetailsEnrichment(row)).toBe(true);
+    expect(detailsFieldMask(row)).toBe(DETAILS_PHOTOS_FIELD_MASK);
   });
 
   it("still needs Details when booking done but address/hours missing", () => {
@@ -197,6 +219,30 @@ describe("feedSpotNeedsHydrate", () => {
         address: "Tokyo",
       }),
     ).toBe(false);
+  });
+
+  it("requests hydrate when photosNeedRefresh is set", () => {
+    expect(
+      feedSpotNeedsHydrate({
+        photoCount: 3,
+        bookingUrl: null,
+        bookingResolved: true,
+        weekdayDescriptions: ["Monday: 11 AM – 10 PM"],
+        address: "Tokyo",
+        photosNeedRefresh: true,
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("spotPhotosNeedRefresh", () => {
+  it("is true for missing or ancient updated_at", () => {
+    expect(spotPhotosNeedRefresh(null)).toBe(true);
+    expect(spotPhotosNeedRefresh("2000-01-01T00:00:00.000Z")).toBe(true);
+  });
+
+  it("is false for a fresh updated_at", () => {
+    expect(spotPhotosNeedRefresh(new Date().toISOString())).toBe(false);
   });
 });
 
