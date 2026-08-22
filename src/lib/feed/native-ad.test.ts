@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { injectNativeAd, SPOTS_PER_AD } from "@/lib/feed/native-ad";
+import { injectNativeAd } from "@/lib/feed/native-ad";
 import { isFeedNativeAd, type FeedSpot } from "@/types/backend";
 
 function fakeSpot(i: number): FeedSpot {
@@ -29,30 +29,14 @@ function fakeSpot(i: number): FeedSpot {
 }
 
 describe("injectNativeAd", () => {
-  it(`inserts one ad after every ${SPOTS_PER_AD} spots`, () => {
+  it("returns spots unchanged while in-feed ads are disabled", () => {
     const spots = Array.from({ length: 9 }, (_, i) => fakeSpot(i));
     const items = injectNativeAd(spots);
 
-    const pattern = items.map((item) => (isFeedNativeAd(item) ? "ad" : "spot"));
-    expect(pattern).toEqual([
-      "spot",
-      "spot",
-      "spot",
-      "ad",
-      "spot",
-      "spot",
-      "spot",
-      "ad",
-      "spot",
-      "spot",
-      "spot",
-      "ad",
-    ]);
-  });
-
-  it("gives each ad a unique id", () => {
-    const spots = Array.from({ length: 6 }, (_, i) => fakeSpot(i));
-    const ads = injectNativeAd(spots).filter(isFeedNativeAd);
-    expect(ads.map((a) => a.id)).toEqual(["ad-slot-0", "ad-slot-1"]);
+    expect(items).toHaveLength(9);
+    expect(items.every((item) => !isFeedNativeAd(item))).toBe(true);
+    expect(items.map((item) => (item as FeedSpot).spotId)).toEqual(
+      spots.map((s) => s.spotId),
+    );
   });
 });
