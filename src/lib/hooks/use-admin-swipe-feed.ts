@@ -51,6 +51,7 @@ export function useAdminSwipeFeed({
   const queueRef = useRef<FeedSpot[]>([]);
   const sessionKeyRef = useRef("");
   const hydrateRequestedRef = useRef<Set<string>>(new Set());
+  const photoRefreshRequestedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     queueRef.current = queue;
@@ -204,6 +205,41 @@ export function useAdminSwipeFeed({
     });
   }, []);
 
+  const refreshSpotPhotos = useCallback(
+    (spotId: string) => {
+      if (!spotId || !active) return;
+      if (photoRefreshRequestedRef.current.has(spotId)) return;
+      photoRefreshRequestedRef.current.add(spotId);
+
+      void (async () => {
+        try {
+          const res = await fetch("/api/spots/hydrate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              spotIds: [spotId],
+              lat,
+              lng,
+              refreshPhotos: true,
+            }),
+          });
+          if (!res.ok) {
+            photoRefreshRequestedRef.current.delete(spotId);
+            return;
+          }
+          const data = (await res.json()) as { spots?: FeedSpot[] };
+          const hydrated = data.spots ?? [];
+          if (hydrated.length === 0) return;
+          const byId = new Map(hydrated.map((s) => [s.spotId, s]));
+          setQueue((prev) => prev.map((s) => byId.get(s.spotId) ?? s));
+        } catch {
+          photoRefreshRequestedRef.current.delete(spotId);
+        }
+      })();
+    },
+    [active, lat, lng],
+  );
+
   const currentSpot = queue[0] ?? null;
   const currentDebug = currentSpot
     ? debugById.get(currentSpot.spotId) ?? null
@@ -220,6 +256,7 @@ export function useAdminSwipeFeed({
     isRefetching,
     error,
     recordSwipe,
+    refreshSpotPhotos,
     refetch: fetchBatch,
   };
 }

@@ -24,6 +24,7 @@ import {
 import { DEFAULT_FEED_CONFIG } from "@/lib/feed/config";
 import {
   DETAILS_FULL_FIELD_MASK,
+  DETAILS_PHOTOS_FIELD_MASK,
   detailsFieldMask,
   isHoursUnavailableStub,
   needsDetailsEnrichment,
@@ -261,12 +262,14 @@ async function fetchPlaceDetails(
       "X-Goog-Api-Key": getApiKey(),
       "X-Goog-FieldMask": fieldMask,
     },
-    next: { revalidate: 3600 },
+    // Photo media names expire; never serve stale Details from Next Data Cache.
+    cache: "no-store",
   });
 
   if (!res.ok) {
+    const errBody = await res.text().catch(() => "");
     console.warn(
-      `[ingest] Place Details failed for ${placeId}: ${res.status}`,
+      `[ingest] Place Details failed for ${placeId}: ${res.status} ${errBody.slice(0, 240)}`,
     );
     return null;
   }
@@ -600,12 +603,17 @@ async function resolveBookingUrl(
 /**
  * Hydrate a single spot via Place Details when photos are sparse and/or
  * the booking pipeline has not run yet (see enrichment-gate).
+ *
+ * `forcePhotos` always re-fetches Place Details photos — used when stored
+ * media names have expired (client saw /api/photo 404).
  */
 export async function enrichSpotFromDetails(
   spotId: string,
   cachedRow?: SpotRow | null,
   apiCalls?: IngestApiCalls,
+  options?: { forcePhotos?: boolean },
 ): Promise<SpotRow | null> {
+  const forcePhotos = options?.forcePhotos === true;
   const cleanedCached = cachedRow
     ? {
         ...cachedRow,
@@ -613,15 +621,18 @@ export async function enrichSpotFromDetails(
       }
     : null;
 
-  if (!needsDetailsEnrichment(cleanedCached)) {
+  if (!forcePhotos && !needsDetailsEnrichment(cleanedCached)) {
     return cachedRow ?? null;
   }
 
   if (apiCalls) apiCalls.placeDetails += 1;
-  const details = await fetchPlaceDetails(
-    spotId,
-    detailsFieldMask(cleanedCached),
-  );
+  // Forced photo refresh only needs media names — never risk FULL mask failures.
+  const fieldMask = forcePhotos
+    ? cleanedCached
+      ? DETAILS_PHOTOS_FIELD_MASK
+      : DETAILS_FULL_FIELD_MASK
+    : detailsFieldMask(cleanedCached);
+  const details = await fetchPlaceDetails(spotId, fieldMask);
 
   // Even if Details fails, Hotpepper can match on name/lat/lng from cache.
   if (!details) {
@@ -652,7 +663,34 @@ export async function enrichSpotFromDetails(
     return cachedRow ?? null;
   }
 
+  // Photos-only FieldMask has no displayName — merge onto cache instead of mapPlaceToRow.
+  if (
+    forcePhotos &&
+    cleanedCached &&
+    fieldMask === DETAILS_PHOTOS_FIELD_MASK
+  ) {
+    const photoOnly: SpotRow = {
+      ...cleanedCached,
+      photos: mapPhotosFromPlace(details),
+      updated_at: new Date().toISOString(),
+    };
+    const { error } = await supabaseAdmin
+      .from("spots")
+      .upsert(photoOnly, { onConflict: "id" });
+    if (error) {
+      console.warn(
+        `[ingest] Photo refresh upsert failed for ${spotId}: ${error.message}`,
+      );
+      return cachedRow ?? null;
+    }
+    return photoOnly;
+  }
+
   const enriched = mapPlaceToRow(details, cleanedCached ?? undefined);
+  if (forcePhotos) {
+    // Always replace photo list on forced refresh — never keep expired media names.
+    enriched.photos = mapPhotosFromPlace(details);
+  }
   if (!isDiningPlace(details) && !isDiningSpotRow(enriched)) {
     return null;
   }

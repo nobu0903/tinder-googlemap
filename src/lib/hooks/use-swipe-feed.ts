@@ -41,6 +41,8 @@ interface UseSwipeFeedReturn {
   isSparseTheme: boolean;
   advance: () => void;
   recordSwipe: (action: SwipeAction) => void;
+  /** Re-fetch Place Details photos after /api/photo 404 (expired media names). */
+  refreshSpotPhotos: (spotId: string) => void;
 }
 
 export function useSwipeFeed({
@@ -59,6 +61,7 @@ export function useSwipeFeed({
   const queueRef = useRef<SwipeFeedItem[]>([]);
   const seenSpotIdsRef = useRef<Set<string>>(new Set());
   const hydrateRequestedRef = useRef<Set<string>>(new Set());
+  const photoRefreshRequestedRef = useRef<Set<string>>(new Set());
   const sessionHydratesRef = useRef(0);
   const lastFetchAtRef = useRef(0);
   const coordsRef = useRef<Coordinates | null>(coords);
@@ -161,6 +164,52 @@ export function useSwipeFeed({
       for (const id of candidateIds) hydrateRequestedRef.current.delete(id);
       // Non-fatal
     }
+  }, []);
+
+  const refreshSpotPhotos = useCallback((spotId: string) => {
+    if (!spotId) return;
+    if (photoRefreshRequestedRef.current.has(spotId)) return;
+    photoRefreshRequestedRef.current.add(spotId);
+
+    const currentCoords = coordsRef.current;
+    if (!currentCoords) return;
+
+    void (async () => {
+      try {
+        const headers: HeadersInit = { "Content-Type": "application/json" };
+        const token = accessTokenRef.current;
+        if (token) headers.Authorization = `Bearer ${token}`;
+
+        const res = await fetch("/api/spots/hydrate", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            spotIds: [spotId],
+            lat: currentCoords.lat,
+            lng: currentCoords.lng,
+            refreshPhotos: true,
+          }),
+        });
+        if (!res.ok) {
+          photoRefreshRequestedRef.current.delete(spotId);
+          return;
+        }
+
+        const data = (await res.json()) as { spots?: FeedSpot[] };
+        const hydrated = data.spots ?? [];
+        if (hydrated.length === 0) return;
+
+        const byId = new Map(hydrated.map((s) => [s.spotId, s]));
+        setQueue((prev) =>
+          prev.map((item) => {
+            if (isFeedNativeAd(item)) return item;
+            return byId.get(item.spotId) ?? item;
+          }),
+        );
+      } catch {
+        photoRefreshRequestedRef.current.delete(spotId);
+      }
+    })();
   }, []);
 
   /**
@@ -335,5 +384,6 @@ export function useSwipeFeed({
     isSparseTheme,
     advance,
     recordSwipe,
+    refreshSpotPhotos,
   };
 }

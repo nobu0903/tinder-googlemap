@@ -2,7 +2,7 @@
 
 
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 
 import Image from "next/image";
 
@@ -30,6 +30,9 @@ interface SwipeCardProps {
 
   /** Only show distance for GPS nearby search — hide for travel / picked areas */
   showDistance?: boolean;
+
+  /** Fired once when a card photo fails to load (expired Places media). */
+  onPhotoError?: () => void;
 
 }
 
@@ -76,12 +79,25 @@ interface PhotoSlotProps {
 
   priority?: boolean;
 
+  onPhotoError?: () => void;
+
 }
 
 
 
-function PhotoSlot({ photo, priority = false }: PhotoSlotProps) {
+function PhotoSlot({
+  photo,
+  priority = false,
+  onPhotoError,
+}: PhotoSlotProps) {
   const [failed, setFailed] = useState(false);
+  const errorNotifiedRef = useRef(false);
+
+  // New URL after forced photo refresh — allow Image to try again.
+  useEffect(() => {
+    setFailed(false);
+    errorNotifiedRef.current = false;
+  }, [photo?.url]);
 
   // Skeleton stays behind the image — never gate the <Image> on onLoad.
   // Cached Next/Image responses often skip a late onLoad; opacity-0 then stuck forever.
@@ -100,6 +116,7 @@ function PhotoSlot({ photo, priority = false }: PhotoSlotProps) {
         className="absolute inset-0 animate-pulse bg-surface-raised"
       />
       <Image
+        key={photo.url}
         src={photo.url}
         alt={photo.alt}
         fill
@@ -108,7 +125,13 @@ function PhotoSlot({ photo, priority = false }: PhotoSlotProps) {
         // Proxied Places photos already include size via /api/photo — skip
         // /_next/image (avoids localPatterns 400 + double-fetch billing risk).
         unoptimized
-        onError={() => setFailed(true)}
+        onError={() => {
+          setFailed(true);
+          if (!errorNotifiedRef.current) {
+            errorNotifiedRef.current = true;
+            onPhotoError?.();
+          }
+        }}
         className="object-cover object-center"
       />
     </>
@@ -125,11 +148,18 @@ interface PhotoPageLayerProps {
 
   priority?: boolean;
 
+  onPhotoError?: () => void;
+
 }
 
 
 
-function PhotoPageLayer({ page, isActive, priority = false }: PhotoPageLayerProps) {
+function PhotoPageLayer({
+  page,
+  isActive,
+  priority = false,
+  onPhotoError,
+}: PhotoPageLayerProps) {
 
   const isDualStack = page.layoutType === "DUAL_STACK";
 
@@ -157,7 +187,11 @@ function PhotoPageLayer({ page, isActive, priority = false }: PhotoPageLayerProp
 
       <div className="relative min-h-0 flex-1 overflow-hidden bg-surface-raised">
 
-        <PhotoSlot photo={topPhoto} priority={priority} />
+        <PhotoSlot
+          photo={topPhoto}
+          priority={priority}
+          onPhotoError={onPhotoError}
+        />
 
       </div>
 
@@ -171,7 +205,7 @@ function PhotoPageLayer({ page, isActive, priority = false }: PhotoPageLayerProp
 
           <div className="relative min-h-0 flex-1 overflow-hidden bg-surface-raised">
 
-            <PhotoSlot photo={bottomPhoto} />
+            <PhotoSlot photo={bottomPhoto} onPhotoError={onPhotoError} />
 
           </div>
 
@@ -198,6 +232,8 @@ export function SwipeCard({
   accessToken,
 
   showDistance = true,
+
+  onPhotoError,
 
 }: SwipeCardProps) {
 
@@ -391,6 +427,8 @@ export function SwipeCard({
                 isActive={idx === pageIndex}
 
                 priority={idx === pageIndex || idx === 0}
+
+                onPhotoError={onPhotoError}
 
               />
 

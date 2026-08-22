@@ -4,7 +4,7 @@ import { MIN_PHOTOS_SKIP_DETAILS } from "@/types/backend";
 /** Photos-only Details — cheapest when identity + booking pipeline already done */
 export const DETAILS_PHOTOS_FIELD_MASK = "id,photos";
 
-/** Full Details including Advanced fields for Hotpepper / Google Reserve */
+/** Full Details including Contact fields for Hotpepper matching */
 export const DETAILS_FULL_FIELD_MASK = [
   "id",
   "displayName",
@@ -17,7 +17,8 @@ export const DETAILS_FULL_FIELD_MASK = [
   "currentOpeningHours",
   "location",
   "nationalPhoneNumber",
-  "reservationUri",
+  // reservationUri was removed from Places API (New) FieldMask — requesting it
+  // returns 400 INVALID_ARGUMENT and blocks all Details enrichment (incl. photos).
 ].join(",");
 
 /** Legacy Batch-B stub — must not count as real hours or block re-enrichment */
@@ -89,7 +90,7 @@ export function needsDetailsEnrichment(row: SpotRow | null): boolean {
 
 /**
  * Field mask for Place Details.
- * Booking-unresolved rows always get the full mask (phone + reservationUri).
+ * Booking-unresolved rows always get the full mask (phone + identity fields).
  * Missing address / weekly hours also need the full mask (not photos-only).
  */
 export function detailsFieldMask(row: SpotRow | null): string {

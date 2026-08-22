@@ -87,6 +87,7 @@ export function SwipeScreen() {
     error,
     isSparseTheme,
     recordSwipe,
+    refreshSpotPhotos,
   } = useSwipeFeed({
     tag,
     accessToken,
@@ -308,6 +309,7 @@ export function SwipeScreen() {
                     onMoreInfoOpenChange={setMoreInfoOpen}
                     accessToken={accessToken}
                     showDistance={!locationLabel}
+                    onPhotoError={() => refreshSpotPhotos(currentItem.spotId)}
                   />
                 )}
               </SwipeableCard>

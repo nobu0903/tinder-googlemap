@@ -49,6 +49,7 @@ export function AdminSwipePanel({
     isRefetching,
     error,
     recordSwipe,
+    refreshSpotPhotos,
     refetch,
   } = useAdminSwipeFeed({ lat, lng, config, active: true });
 
@@ -146,6 +147,7 @@ export function AdminSwipePanel({
               <SwipeCard
                 spot={currentSpot}
                 onMoreInfoOpenChange={setMoreInfoOpen}
+                onPhotoError={() => refreshSpotPhotos(currentSpot.spotId)}
               />
               <SwipeActions
                 hidden={moreInfoOpen}

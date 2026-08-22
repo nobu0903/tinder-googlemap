@@ -124,7 +124,7 @@ describe("detailsFieldMask", () => {
     const mask = detailsFieldMask(baseRow());
     expect(mask).toBe(DETAILS_FULL_FIELD_MASK);
     expect(mask).toContain("nationalPhoneNumber");
-    expect(mask).toContain("reservationUri");
+    expect(mask).not.toContain("reservationUri");
   });
 
   it("uses photos-only when booking/hours/address done and only photos are sparse", () => {

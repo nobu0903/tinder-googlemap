@@ -11,6 +11,8 @@ const BodySchema = z.object({
   spotIds: z.array(z.string().min(1)).min(1).max(2),
   lat: z.number().min(-90).max(90),
   lng: z.number().min(-180).max(180),
+  /** Force Place Details photo refresh (expired media names). */
+  refreshPhotos: z.boolean().optional(),
 });
 
 /** Stricter than feed — each hit may cost Place Details + Hotpepper */
@@ -65,7 +67,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { spotIds, lat, lng } = parsed.data;
+  const { spotIds, lat, lng, refreshPhotos } = parsed.data;
 
   try {
     const { data: cachedRows, error: selectError } = await supabaseAdmin
@@ -98,12 +100,14 @@ export async function POST(req: NextRequest) {
     for (const spotId of spotIds) {
       const source = byId.get(spotId)!;
 
-      if (!needsDetailsEnrichment(source)) {
+      if (!refreshPhotos && !needsDetailsEnrichment(source)) {
         rows.push(source);
         continue;
       }
 
-      const enriched = await enrichSpotFromDetails(spotId, source);
+      const enriched = await enrichSpotFromDetails(spotId, source, undefined, {
+        forcePhotos: Boolean(refreshPhotos),
+      });
       if (enriched) rows.push(enriched);
       else rows.push(source);
     }
