@@ -103,6 +103,9 @@ function PhotoSlot({ photo, priority = false }: PhotoSlotProps) {
         fill
         priority={priority}
         sizes="(max-width: 400px) 100vw, 400px"
+        // Proxied Places photos already include size via /api/photo — skip
+        // /_next/image (avoids localPatterns 400 + double-fetch billing risk).
+        unoptimized
         className="object-cover object-center"
       />
     </>

@@ -7,7 +7,7 @@ import type {
   FeedPhotoPage,
   OpeningHoursPeriod,
 } from "@/types/backend";
-import { MAX_STORED_PHOTOS } from "@/types/backend";
+import { MAX_STORED_PHOTOS, SWIPE_CARD_PHOTO_WIDTH } from "@/types/backend";
 import { stripHoursUnavailableStub } from "@/lib/places/enrichment-gate";
 import { toClientPhotoUrl } from "@/lib/places/photo-url";
 
@@ -212,7 +212,7 @@ function isLandscape(photo: SpotPhoto): boolean {
 
 function toPhotoMeta(photo: SpotPhoto, row: SpotRow, index: number) {
   return {
-    url: toClientPhotoUrl(photo.url),
+    url: toClientPhotoUrl(photo.url, SWIPE_CARD_PHOTO_WIDTH),
     alt: `${row.name} photo ${index + 1}`,
   };
 }

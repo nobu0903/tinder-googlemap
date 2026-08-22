@@ -55,7 +55,7 @@ export function stripPhotoApiKey(url: string): string {
  */
 export function toClientPhotoUrl(
   storedUrlOrName: string,
-  maxWidthPx = 800,
+  maxWidthPx = 480,
 ): string {
   const name = extractPlacesPhotoName(storedUrlOrName);
   if (!name) return stripPhotoApiKey(storedUrlOrName);
