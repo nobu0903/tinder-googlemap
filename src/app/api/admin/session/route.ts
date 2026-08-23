@@ -1,0 +1,80 @@
+import { NextRequest, NextResponse } from "next/server";
+import {
+  attachAdminSessionCookie,
+  clearAdminSessionCookie,
+  verifyAdminRequest,
+} from "@/lib/admin/auth";
+
+/**
+ * GET /api/admin/session — check / establish admin session.
+ * Returns 200 always (avoids noisy 401 in the browser console while gated).
+ *
+ * Local: if ADMIN_SECRET is set in .env, auto-attaches HttpOnly cookie.
+ * Production: no auto-unlock — use POST from /ohyeswaitaminutemisterpostman.
+ */
+export async function GET(req: NextRequest) {
+  if (verifyAdminRequest(req)) {
+    return NextResponse.json({ authenticated: true });
+  }
+
+  const secret = process.env.ADMIN_SECRET?.trim();
+  if (secret && process.env.NODE_ENV === "development") {
+    const res = NextResponse.json({ authenticated: true, auto: true });
+    attachAdminSessionCookie(res, secret);
+    return res;
+  }
+
+  if (
+    !secret &&
+    process.env.ALLOW_INSECURE_ADMIN === "1" &&
+    process.env.NODE_ENV === "development"
+  ) {
+    return NextResponse.json({ authenticated: true, insecure: true });
+  }
+
+  return NextResponse.json({ authenticated: false });
+}
+
+/**
+ * POST /api/admin/session — unlock with password matching ADMIN_SECRET.
+ * Used in production (or when cookie expired).
+ */
+export async function POST(req: NextRequest) {
+  const secret = process.env.ADMIN_SECRET?.trim();
+  if (!secret) {
+    return NextResponse.json(
+      { error: "ADMIN_SECRET is not configured on the server" },
+      { status: 503 },
+    );
+  }
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const password =
+    typeof body === "object" &&
+    body !== null &&
+    "password" in body &&
+    typeof (body as { password: unknown }).password === "string"
+      ? (body as { password: string }).password
+      : "";
+
+  if (password !== secret) {
+    return NextResponse.json({ error: "Invalid password" }, { status: 401 });
+  }
+
+  const res = NextResponse.json({ authenticated: true });
+  attachAdminSessionCookie(res, secret);
+  return res;
+}
+
+/** DELETE /api/admin/session — clear cookie */
+export async function DELETE() {
+  const res = NextResponse.json({ authenticated: false });
+  clearAdminSessionCookie(res);
+  return res;
+}

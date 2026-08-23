@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   AREA_GEM_BANDS,
   type AreaProfile,
@@ -13,7 +14,8 @@ import {
   formatGoogleMapsCoordinates,
   parseGoogleMapsCoordinates,
 } from "@/lib/geo/coordinates";
-import { adminFetch, ADMIN_SECRET_KEY } from "@/lib/admin/client";
+import { ADMIN_UNLOCK_PATH } from "@/lib/admin/constants";
+import { adminFetch } from "@/lib/admin/client";
 import { AdminSwipePanel } from "@/components/admin/admin-swipe-panel";
 
 const LOCATION_PRESETS = [
@@ -65,7 +67,10 @@ function areaProfileBadge(profile: AreaProfile) {
 }
 
 export function AdminScreen() {
-  const [secret, setSecret] = useState("");
+  const router = useRouter();
+  const [authState, setAuthState] = useState<"checking" | "needed" | "ok">(
+    "checking",
+  );
   const [coordinates, setCoordinates] = useState(
     formatGoogleMapsCoordinates(35.658034, 139.701636),
   );
@@ -109,21 +114,34 @@ export function AdminScreen() {
   }, [loadConfig, loadCache]);
 
   useEffect(() => {
-    const saved = sessionStorage.getItem(ADMIN_SECRET_KEY);
-    if (saved) setSecret(saved);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/admin/session", { credentials: "include" });
+        const data = (await res.json()) as { authenticated?: boolean };
+        if (cancelled) return;
+        if (data.authenticated) {
+          setAuthState("ok");
+        } else {
+          setAuthState("needed");
+        }
+      } catch {
+        if (!cancelled) setAuthState("needed");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
-    if (secret || process.env.NODE_ENV === "development") {
-      init();
-    }
-  }, [secret, init]);
+    if (authState === "ok") void init();
+  }, [authState, init]);
 
-  const saveSecret = () => {
-    sessionStorage.setItem(ADMIN_SECRET_KEY, secret);
-    setStatus("Secret saved.");
-    init();
-  };
+  useEffect(() => {
+    if (authState !== "needed") return;
+    router.replace(ADMIN_UNLOCK_PATH);
+  }, [authState, router]);
 
   const resolveCoordinates = (): { lat: number; lng: number } => {
     const parsed = parseGoogleMapsCoordinates(coordinates);
@@ -278,32 +296,18 @@ export function AdminScreen() {
       </header>
 
       <main className="mx-auto max-w-6xl space-y-6 px-4 py-6 md:px-8">
-        {/* Auth */}
-        <section className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-4">
-          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-neutral-500">
-            Access
-          </h2>
-          <div className="flex flex-wrap items-end gap-2">
-            <label className="flex flex-col gap-1 text-xs text-neutral-500">
-              Admin secret (ADMIN_SECRET env)
-              <input
-                type="password"
-                value={secret}
-                onChange={(e) => setSecret(e.target.value)}
-                className="w-48 rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 font-mono text-sm text-neutral-200"
-                placeholder="dev: leave empty"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={saveSecret}
-              className="rounded bg-neutral-800 px-3 py-1.5 text-xs hover:bg-neutral-700"
-            >
-              Save
-            </button>
-          </div>
-        </section>
+        {authState === "checking" && (
+          <p className="animate-pulse text-sm text-neutral-500">Checking access…</p>
+        )}
 
+        {authState === "needed" && (
+          <p className="text-sm text-neutral-500">
+            Redirecting to unlock…
+          </p>
+        )}
+
+        {authState === "ok" && (
+          <>
         {error && (
           <div className="rounded border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">
             {error}
@@ -334,7 +338,7 @@ export function AdminScreen() {
             </li>
             <li>
               <strong className="text-neutral-300">本番スワイプ (/api/swipe)</strong>
-              ：Save config のスロット比など ＋ リクエスト時の自動帯
+              ：「アルゴリズム設定を本番に反映」のスロット比など ＋ リクエスト時の自動帯
             </li>
           </ul>
           {config && (
@@ -645,7 +649,7 @@ export function AdminScreen() {
               onClick={saveConfig}
               className="rounded bg-neutral-700 px-3 py-1.5 text-xs hover:bg-neutral-600 disabled:opacity-50"
             >
-              Save config
+              アルゴリズム設定を本番に反映
             </button>
             <button
               type="button"
@@ -657,7 +661,7 @@ export function AdminScreen() {
             </button>
           </div>
           <p className="mt-2 text-[10px] text-neutral-600">
-            DB 分析・スワイプはエリア密度を自動判定して帯を決めます。スロット比などはフォームが即反映。本番に反映するには Save config。
+            DB 分析・スワイプはエリア密度を自動判定して帯を決めます。スロット比などはフォームが即反映。本番に反映するには「アルゴリズム設定を本番に反映」。
           </p>
         </section>
 
@@ -732,6 +736,8 @@ export function AdminScreen() {
             </div>
           )}
         </section>
+          </>
+        )}
       </main>
 
       {swipeSession && (

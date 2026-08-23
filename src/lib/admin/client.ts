@@ -1,17 +1,10 @@
-export const ADMIN_SECRET_KEY = "vibeloop_admin_secret";
-
-export function adminHeaders(): HeadersInit {
-  if (typeof window === "undefined") return {};
-  const secret = sessionStorage.getItem(ADMIN_SECRET_KEY) ?? "";
-  return secret ? { "X-Admin-Secret": secret } : {};
-}
-
+/** Fetch admin APIs with cookie credentials (HttpOnly session from /api/admin/session). */
 export async function adminFetch(url: string, init?: RequestInit) {
   const res = await fetch(url, {
     ...init,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      ...adminHeaders(),
       ...init?.headers,
     },
   });

@@ -1,10 +1,19 @@
 import { describe, expect, it, afterEach, vi } from "vitest";
-import { verifyAdminRequest } from "@/lib/admin/auth";
+import {
+  ADMIN_COOKIE_NAME,
+  verifyAdminRequest,
+} from "@/lib/admin/auth";
 
-function makeReq(secretHeader?: string): Request {
+function makeReq(opts?: { secretHeader?: string; cookieSecret?: string }): Request {
   const headers = new Headers();
-  if (secretHeader !== undefined) {
-    headers.set("x-admin-secret", secretHeader);
+  if (opts?.secretHeader !== undefined) {
+    headers.set("x-admin-secret", opts.secretHeader);
+  }
+  if (opts?.cookieSecret !== undefined) {
+    headers.set(
+      "cookie",
+      `${ADMIN_COOKIE_NAME}=${encodeURIComponent(opts.cookieSecret)}`,
+    );
   }
   return new Request("http://localhost/api/admin/cache", { headers });
 }
@@ -31,7 +40,14 @@ describe("verifyAdminRequest (BUG-014)", () => {
   it("requires matching x-admin-secret when ADMIN_SECRET is set", () => {
     vi.stubEnv("ADMIN_SECRET", "s3cret");
     vi.stubEnv("NODE_ENV", "development");
-    expect(verifyAdminRequest(makeReq("wrong"))).toBe(false);
-    expect(verifyAdminRequest(makeReq("s3cret"))).toBe(true);
+    expect(verifyAdminRequest(makeReq({ secretHeader: "wrong" }))).toBe(false);
+    expect(verifyAdminRequest(makeReq({ secretHeader: "s3cret" }))).toBe(true);
+  });
+
+  it("accepts matching HttpOnly-style cookie", () => {
+    vi.stubEnv("ADMIN_SECRET", "s3cret");
+    vi.stubEnv("NODE_ENV", "production");
+    expect(verifyAdminRequest(makeReq({ cookieSecret: "wrong" }))).toBe(false);
+    expect(verifyAdminRequest(makeReq({ cookieSecret: "s3cret" }))).toBe(true);
   });
 });
