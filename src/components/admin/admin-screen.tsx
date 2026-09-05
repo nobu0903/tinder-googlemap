@@ -17,6 +17,7 @@ import {
 import { ADMIN_UNLOCK_PATH } from "@/lib/admin/constants";
 import { adminFetch } from "@/lib/admin/client";
 import { AdminSwipePanel } from "@/components/admin/admin-swipe-panel";
+import { AdminSnsCardPanel } from "@/components/admin/admin-sns-card-panel";
 
 const LOCATION_PRESETS = [
   { label: "渋谷", lat: 35.658034, lng: 139.701636 },
@@ -406,6 +407,8 @@ export function AdminScreen() {
             </button>
           </div>
         </section>
+
+        <AdminSnsCardPanel />
 
         {/* Summary */}
         {preview && (
