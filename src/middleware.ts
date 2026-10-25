@@ -12,7 +12,7 @@ import { verifyAdminRequest } from "@/lib/admin/auth";
  *
  * Real authorization remains verifyAdminRequest inside each API route.
  */
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   if (process.env.NODE_ENV === "development") {
     return NextResponse.next();
   }
@@ -25,7 +25,7 @@ export function middleware(req: NextRequest) {
   }
 
   if (pathname === "/admin" || pathname.startsWith("/admin/")) {
-    if (verifyAdminRequest(req)) return NextResponse.next();
+    if (await verifyAdminRequest(req)) return NextResponse.next();
     return new NextResponse("Not Found", {
       status: 404,
       headers: { "content-type": "text/plain; charset=utf-8" },
@@ -33,7 +33,7 @@ export function middleware(req: NextRequest) {
   }
 
   if (pathname.startsWith("/api/admin")) {
-    if (verifyAdminRequest(req)) return NextResponse.next();
+    if (await verifyAdminRequest(req)) return NextResponse.next();
     // Same status as a missing route — do not leak "Unauthorized".
     return NextResponse.json({ error: "Not Found" }, { status: 404 });
   }

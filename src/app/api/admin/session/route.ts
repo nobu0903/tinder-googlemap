@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  adminSecretsMatch,
   attachAdminSessionCookie,
   clearAdminSessionCookie,
   verifyAdminRequest,
 } from "@/lib/admin/auth";
+import { consumeRateLimit } from "@/lib/api/rate-limit";
 
 /**
  * GET /api/admin/session — check / establish admin session.
@@ -13,14 +15,14 @@ import {
  * Production: no auto-unlock — use POST from /ohyeswaitaminutemisterpostman.
  */
 export async function GET(req: NextRequest) {
-  if (verifyAdminRequest(req)) {
+  if (await verifyAdminRequest(req)) {
     return NextResponse.json({ authenticated: true });
   }
 
   const secret = process.env.ADMIN_SECRET?.trim();
   if (secret && process.env.NODE_ENV === "development") {
     const res = NextResponse.json({ authenticated: true, auto: true });
-    attachAdminSessionCookie(res, secret);
+    await attachAdminSessionCookie(res, secret);
     return res;
   }
 
@@ -40,6 +42,20 @@ export async function GET(req: NextRequest) {
  * Used in production (or when cookie expired).
  */
 export async function POST(req: NextRequest) {
+  const limit = await consumeRateLimit(req, "admin-login", {
+    windowMs: 15 * 60 * 1000,
+    maxPerWindow: 8,
+  });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: "Too many attempts. Try again later." },
+      {
+        status: 429,
+        headers: { "Retry-After": String(limit.retryAfterSec) },
+      },
+    );
+  }
+
   const secret = process.env.ADMIN_SECRET?.trim();
   if (!secret) {
     return NextResponse.json(
@@ -63,12 +79,13 @@ export async function POST(req: NextRequest) {
       ? (body as { password: string }).password
       : "";
 
-  if (password !== secret) {
+  if (!(await adminSecretsMatch(password, secret))) {
+    console.warn("[POST /api/admin/session] rejected login");
     return NextResponse.json({ error: "Invalid password" }, { status: 401 });
   }
 
   const res = NextResponse.json({ authenticated: true });
-  attachAdminSessionCookie(res, secret);
+  await attachAdminSessionCookie(res, secret);
   return res;
 }
 

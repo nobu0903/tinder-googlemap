@@ -134,6 +134,24 @@ export function feedSpotNeedsHydrate(spot: {
 /** Places photo resource names expire; refresh Details after this age. */
 export const PHOTO_MEDIA_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * Minimum gap between forced Place Details photo refreshes for one spot.
+ * Stops refreshPhotos from billing Google on every card error.
+ */
+export const FORCED_PHOTO_REFRESH_COOLDOWN_MS = 15 * 60 * 1000;
+
+/** True when updated_at is recent enough that a forced photo refresh should no-op. */
+export function isForcedPhotoRefreshCoolingDown(
+  updatedAt: string | null | undefined,
+  nowMs = Date.now(),
+): boolean {
+  if (!updatedAt) return false;
+  const updated = Date.parse(updatedAt);
+  if (!Number.isFinite(updated)) return false;
+  const age = nowMs - updated;
+  return age >= 0 && age < FORCED_PHOTO_REFRESH_COOLDOWN_MS;
+}
+
 /** True when spot.updated_at is missing or older than PHOTO_MEDIA_MAX_AGE_MS. */
 export function spotPhotosNeedRefresh(
   updatedAt: string | null | undefined,

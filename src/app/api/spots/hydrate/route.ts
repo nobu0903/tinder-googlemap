@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { enrichSpotFromDetails } from "@/lib/places/ingest";
-import { needsDetailsEnrichment } from "@/lib/places/enrichment-gate";
+import {
+  isForcedPhotoRefreshCoolingDown,
+  needsDetailsEnrichment,
+} from "@/lib/places/enrichment-gate";
 import { rowToFeedSpot } from "@/lib/places/format";
-import { createIpRateLimiter, getClientIp } from "@/lib/api/rate-limit";
+import { consumeRateLimit } from "@/lib/api/rate-limit";
 import type { SpotRow } from "@/types/backend";
 
 const BodySchema = z.object({
@@ -16,10 +19,8 @@ const BodySchema = z.object({
 });
 
 /** Stricter than feed — each hit may cost Place Details + Hotpepper */
-const hydrateRateLimit = createIpRateLimiter({
-  windowMs: 60 * 60 * 1000,
-  maxPerWindow: 30,
-});
+const HYDRATE_WINDOW_MS = 60 * 60 * 1000;
+const HYDRATE_MAX_PER_WINDOW = 30;
 
 /**
  * POST /api/spots/hydrate — lazy Place Details for visible cards (max 2 spots).
@@ -30,8 +31,10 @@ const hydrateRateLimit = createIpRateLimiter({
  * - Skips Details when photos + booking pipeline are already complete
  */
 export async function POST(req: NextRequest) {
-  const ip = getClientIp(req);
-  const rate = hydrateRateLimit.check(ip);
+  const rate = await consumeRateLimit(req, "hydrate", {
+    windowMs: HYDRATE_WINDOW_MS,
+    maxPerWindow: HYDRATE_MAX_PER_WINDOW,
+  });
   if (!rate.allowed) {
     return NextResponse.json(
       { error: "Rate limit exceeded" },
@@ -100,6 +103,15 @@ export async function POST(req: NextRequest) {
     for (const spotId of spotIds) {
       const source = byId.get(spotId)!;
 
+      if (
+        refreshPhotos &&
+        (source.photos?.length ?? 0) > 0 &&
+        isForcedPhotoRefreshCoolingDown(source.updated_at)
+      ) {
+        rows.push(source);
+        continue;
+      }
+
       if (!refreshPhotos && !needsDetailsEnrichment(source)) {
         rows.push(source);
         continue;
@@ -126,6 +138,6 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Hydrate failed";
     console.error("[POST /api/spots/hydrate]", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "Hydrate failed" }, { status: 500 });
   }
 }

@@ -67,7 +67,7 @@ async function runPreview(opts: {
 }
 
 export async function GET(req: NextRequest) {
-  if (!verifyAdminRequest(req)) return adminUnauthorized();
+  if (!(await verifyAdminRequest(req))) return adminUnauthorized();
 
   const params = Object.fromEntries(req.nextUrl.searchParams.entries());
   const parsed = QuerySchema.safeParse(params);
@@ -93,13 +93,13 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("[GET /api/admin/feed-preview]", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "Request failed" }, { status: 500 });
   }
 }
 
 /** POST — preview with Algorithm config form values (no Save required) */
 export async function POST(req: NextRequest) {
-  if (!verifyAdminRequest(req)) return adminUnauthorized();
+  if (!(await verifyAdminRequest(req))) return adminUnauthorized();
 
   let body: unknown;
   try {
@@ -133,6 +133,6 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("[POST /api/admin/feed-preview]", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "Request failed" }, { status: 500 });
   }
 }

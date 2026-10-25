@@ -27,7 +27,7 @@ const PostBodySchema = z.object({
 
 /** POST — DB-only feed analysis (0 Google API calls) */
 export async function POST(req: NextRequest) {
-  if (!verifyAdminRequest(req)) return adminUnauthorized();
+  if (!(await verifyAdminRequest(req))) return adminUnauthorized();
 
   let body: unknown;
   try {
@@ -64,6 +64,6 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("[POST /api/admin/feed-analyze]", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "Request failed" }, { status: 500 });
   }
 }

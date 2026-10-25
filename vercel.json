@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/keep-alive",
+      "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/cron/keep-alive",
+      "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/keep-alive",
+      "schedule": "0 17 * * *"
+    }
+  ]
+}

@@ -6,6 +6,7 @@ import {
   feedSpotNeedsHydrate,
   HOURS_UNAVAILABLE_STUB,
   isBookingPipelineDone,
+  isForcedPhotoRefreshCoolingDown,
   needsDetailsEnrichment,
   spotPhotosNeedRefresh,
   stripHoursUnavailableStub,
@@ -243,6 +244,22 @@ describe("spotPhotosNeedRefresh", () => {
 
   it("is false for a fresh updated_at", () => {
     expect(spotPhotosNeedRefresh(new Date().toISOString())).toBe(false);
+  });
+});
+
+describe("isForcedPhotoRefreshCoolingDown", () => {
+  const now = Date.parse("2026-06-01T00:00:00.000Z");
+
+  it("is true for a spot updated inside the cooldown", () => {
+    expect(
+      isForcedPhotoRefreshCoolingDown("2026-05-31T23:50:00.000Z", now),
+    ).toBe(true);
+  });
+
+  it("is false once the cooldown has passed", () => {
+    expect(
+      isForcedPhotoRefreshCoolingDown("2026-05-31T23:00:00.000Z", now),
+    ).toBe(false);
   });
 });
 

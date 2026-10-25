@@ -8,7 +8,7 @@ import {
 } from "@/lib/feed/config";
 
 export async function GET(req: NextRequest) {
-  if (!verifyAdminRequest(req)) return adminUnauthorized();
+  if (!(await verifyAdminRequest(req))) return adminUnauthorized();
   return NextResponse.json({ config: getFeedConfig() });
 }
 
@@ -27,7 +27,7 @@ const ConfigSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  if (!verifyAdminRequest(req)) return adminUnauthorized();
+  if (!(await verifyAdminRequest(req))) return adminUnauthorized();
 
   let body: unknown;
   try {

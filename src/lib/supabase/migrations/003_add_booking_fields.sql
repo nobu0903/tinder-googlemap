@@ -25,3 +25,13 @@ CREATE TABLE IF NOT EXISTS booking_clicks (
 
 CREATE INDEX IF NOT EXISTS booking_clicks_spot_id_idx    ON booking_clicks (spot_id);
 CREATE INDEX IF NOT EXISTS booking_clicks_created_at_idx ON booking_clicks (created_at);
+
+ALTER TABLE booking_clicks ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "booking_clicks_service_all" ON booking_clicks;
+CREATE POLICY "booking_clicks_service_all"
+  ON booking_clicks FOR ALL
+  USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+REVOKE ALL ON TABLE booking_clicks FROM anon, authenticated;

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractPlacesPhotoName } from "@/lib/places/photo-url";
 import { SWIPE_CARD_PHOTO_WIDTH } from "@/types/backend";
-import { createIpRateLimiter, getClientIp } from "@/lib/api/rate-limit";
+import { consumeRateLimit } from "@/lib/api/rate-limit";
 
 const GOOGLE_PLACES_BASE = "https://places.googleapis.com/v1";
 const NAME_PATTERN = /^places\/[^/]+\/photos\/[^/]+$/;
@@ -11,10 +11,8 @@ const PHOTO_CACHE_CONTROL =
   "public, max-age=86400, stale-while-revalidate=604800";
 
 /** Cap unauthenticated photo proxy abuse (Places Photo billing). */
-const photoRateLimit = createIpRateLimiter({
-  windowMs: 60 * 60 * 1000,
-  maxPerWindow: 120,
-});
+const PHOTO_WINDOW_MS = 60 * 60 * 1000;
+const PHOTO_MAX_PER_WINDOW = 120;
 
 /**
  * GET /api/photo?name=places%2F...%2Fphotos%2F...&maxWidthPx=480
@@ -26,8 +24,10 @@ const photoRateLimit = createIpRateLimiter({
  * while production returned 502).
  */
 export async function GET(req: NextRequest) {
-  const ip = getClientIp(req);
-  const rate = photoRateLimit.check(ip);
+  const rate = await consumeRateLimit(req, "photo", {
+    windowMs: PHOTO_WINDOW_MS,
+    maxPerWindow: PHOTO_MAX_PER_WINDOW,
+  });
   if (!rate.allowed) {
     return NextResponse.json(
       { error: "Too many photo requests. Try again later." },
@@ -106,6 +106,6 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Photo proxy failed";
     console.error("[GET /api/photo]", message);
-    return NextResponse.json({ error: message }, { status: 502 });
+    return NextResponse.json({ error: "Photo proxy failed" }, { status: 502 });
   }
 }

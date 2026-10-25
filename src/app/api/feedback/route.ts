@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createIpRateLimiter, getClientIp } from "@/lib/api/rate-limit";
+import { consumeRateLimit } from "@/lib/api/rate-limit";
 import { FeedbackBodySchema } from "@/lib/feedback/schema";
 import { supabaseAdmin } from "@/lib/supabase/server";
 
-const feedbackRateLimit = createIpRateLimiter({
-  windowMs: 60 * 60 * 1000,
-  maxPerWindow: 10,
-});
-
 /** POST /api/feedback — store guided feedback from Settings */
 export async function POST(req: NextRequest) {
-  const ip = getClientIp(req);
-  const limit = feedbackRateLimit.check(ip);
+  const limit = await consumeRateLimit(req, "feedback", {
+    windowMs: 60 * 60 * 1000,
+    maxPerWindow: 10,
+  });
   if (!limit.allowed) {
     return NextResponse.json(
       { ok: false, error: "rate_limited" },

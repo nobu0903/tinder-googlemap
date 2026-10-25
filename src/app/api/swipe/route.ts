@@ -5,6 +5,7 @@ import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { runFeedEngine } from "@/lib/feed/engine";
 import { injectNativeAd } from "@/lib/feed/native-ad";
+import { consumeRateLimit } from "@/lib/api/rate-limit";
 import type { SwipeFeedResponse } from "@/types/backend";
 
 const QuerySchema = z.object({
@@ -19,43 +20,9 @@ function parseExcludeParam(raw: string | undefined): string[] {
   return raw.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
-// ── Server-side rate limiter ──────────────────────────────────────────────────
-// Prevents runaway API costs from idle browsers, bots, or abuse.
-// Max 15 feed requests per hour per IP.
-// Note: in-memory — resets per serverless function instance (adds protection on top
-// of the DB-backed ingest cooldown, which is the cross-instance guard).
-
-const ipRateMap = new Map<string, { count: number; windowStart: number }>();
-const RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+// Max 15 feed requests per hour per IP (DB-backed; see consumeRateLimit).
+const RATE_WINDOW_MS = 60 * 60 * 1000;
 const RATE_LIMIT_PER_WINDOW = 15;
-
-function getClientIp(req: NextRequest): string {
-  return (
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    req.headers.get("x-real-ip") ??
-    "unknown"
-  );
-}
-
-function checkRateLimit(ip: string): { allowed: boolean; remaining: number } {
-  const now = Date.now();
-  const entry = ipRateMap.get(ip);
-
-  if (!entry || now - entry.windowStart >= RATE_WINDOW_MS) {
-    ipRateMap.set(ip, { count: 1, windowStart: now });
-    return { allowed: true, remaining: RATE_LIMIT_PER_WINDOW - 1 };
-  }
-
-  if (entry.count >= RATE_LIMIT_PER_WINDOW) {
-    const retryAfterMs = RATE_WINDOW_MS - (now - entry.windowStart);
-    return { allowed: false, remaining: 0 };
-  }
-
-  entry.count++;
-  return { allowed: true, remaining: RATE_LIMIT_PER_WINDOW - entry.count };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
   try {
@@ -91,7 +58,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "Feed request failed" }, { status: 500 });
   }
 }
 
@@ -106,16 +73,17 @@ async function handleSwipeFeed(req: NextRequest) {
     );
   }
 
-  // Rate limit — applied after param parsing but before any expensive work
-  const ip = getClientIp(req);
-  const rateCheck = checkRateLimit(ip);
+  const rateCheck = await consumeRateLimit(req, "swipe", {
+    windowMs: RATE_WINDOW_MS,
+    maxPerWindow: RATE_LIMIT_PER_WINDOW,
+  });
   if (!rateCheck.allowed) {
     return NextResponse.json(
       { error: "Too many requests. Please slow down." },
       {
         status: 429,
         headers: {
-          "Retry-After": String(Math.ceil(RATE_WINDOW_MS / 1000)),
+          "Retry-After": String(rateCheck.retryAfterSec),
           "X-RateLimit-Limit": String(RATE_LIMIT_PER_WINDOW),
           "X-RateLimit-Remaining": "0",
         },

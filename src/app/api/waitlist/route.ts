@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createIpRateLimiter, getClientIp } from "@/lib/api/rate-limit";
+import { consumeRateLimit } from "@/lib/api/rate-limit";
 import { supabaseAdmin } from "@/lib/supabase/server";
 
 const BodySchema = z.object({
@@ -15,15 +15,12 @@ const BodySchema = z.object({
     .transform((v) => (v && v.length > 0 ? v : null)),
 });
 
-const waitlistRateLimit = createIpRateLimiter({
-  windowMs: 60 * 60 * 1000,
-  maxPerWindow: 8,
-});
-
 /** POST /api/waitlist — register interest for the mobile app */
 export async function POST(req: NextRequest) {
-  const ip = getClientIp(req);
-  const limit = waitlistRateLimit.check(ip);
+  const limit = await consumeRateLimit(req, "waitlist", {
+    windowMs: 60 * 60 * 1000,
+    maxPerWindow: 8,
+  });
   if (!limit.allowed) {
     return NextResponse.json(
       { ok: false, error: "rate_limited" },
@@ -49,18 +46,19 @@ export async function POST(req: NextRequest) {
   const email = parsed.data.email.toLowerCase();
   const { wantsIos, wantsAndroid, featureRequests } = parsed.data;
 
-  const { error } = await supabaseAdmin.from("app_waitlist").upsert(
-    {
-      email,
-      wants_ios: wantsIos,
-      wants_android: wantsAndroid,
-      feature_requests: featureRequests,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "email" },
-  );
+  // Insert only. A repeat of an existing email must not overwrite that row
+  // (no proof the caller owns the address). Duplicate looks like success.
+  const { error } = await supabaseAdmin.from("app_waitlist").insert({
+    email,
+    wants_ios: wantsIos,
+    wants_android: wantsAndroid,
+    feature_requests: featureRequests,
+  });
 
   if (error) {
+    if (error.code === "23505") {
+      return NextResponse.json({ ok: true });
+    }
     console.error("[POST /api/waitlist]", error.message);
     return NextResponse.json({ ok: false, error: "server" }, { status: 500 });
   }

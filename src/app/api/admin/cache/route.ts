@@ -10,14 +10,15 @@ import {
 } from "@/lib/places/ingest";
 
 export async function GET(req: NextRequest) {
-  if (!verifyAdminRequest(req)) return adminUnauthorized();
+  if (!(await verifyAdminRequest(req))) return adminUnauthorized();
 
   const { count, error } = await supabaseAdmin
     .from("spots")
     .select("*", { count: "exact", head: true });
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("[GET /api/admin/cache]", error.message);
+    return NextResponse.json({ error: "Request failed" }, { status: 500 });
   }
 
   const { data: latest } = await supabaseAdmin
@@ -48,7 +49,7 @@ const IngestSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  if (!verifyAdminRequest(req)) return adminUnauthorized();
+  if (!(await verifyAdminRequest(req))) return adminUnauthorized();
 
   let body: unknown;
   try {
@@ -95,7 +96,8 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Ingest failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("[POST /api/admin/cache]", message);
+    return NextResponse.json({ error: "Request failed" }, { status: 500 });
   }
 }
 
@@ -115,7 +117,7 @@ const HARD_DELETE_CONFIRM = "DELETE_ALL_SPOTS_AND_SWIPES";
  * Hard delete only with `{ "mode": "hard", "confirm": "DELETE_ALL_SPOTS_AND_SWIPES" }`.
  */
 export async function DELETE(req: NextRequest) {
-  if (!verifyAdminRequest(req)) return adminUnauthorized();
+  if (!(await verifyAdminRequest(req))) return adminUnauthorized();
 
   let raw: unknown = {};
   try {
@@ -148,7 +150,8 @@ export async function DELETE(req: NextRequest) {
     const { error } = await supabaseAdmin.from("spots").delete().neq("id", "");
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error("[DELETE /api/admin/cache] hard", error.message);
+      return NextResponse.json({ error: "Request failed" }, { status: 500 });
     }
 
     return NextResponse.json({
@@ -166,7 +169,8 @@ export async function DELETE(req: NextRequest) {
     .neq("id", "");
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("[DELETE /api/admin/cache] soft", error.message);
+    return NextResponse.json({ error: "Request failed" }, { status: 500 });
   }
 
   return NextResponse.json({

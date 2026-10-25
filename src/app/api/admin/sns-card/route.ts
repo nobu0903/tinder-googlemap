@@ -12,7 +12,7 @@ const BodySchema = z.object({
  * for screenshot-ready swipe cards on the admin page.
  */
 export async function POST(req: NextRequest) {
-  if (!verifyAdminRequest(req)) return adminUnauthorized();
+  if (!(await verifyAdminRequest(req))) return adminUnauthorized();
 
   let body: unknown;
   try {
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
       message.startsWith("Place Details failed") ||
       message.startsWith("This place has no photos");
     return NextResponse.json(
-      { error: message },
+      { error: clientError ? message : "Request failed" },
       { status: clientError ? 400 : 500 },
     );
   }
