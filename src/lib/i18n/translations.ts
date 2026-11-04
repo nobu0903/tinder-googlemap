@@ -56,7 +56,7 @@ export const translations = {
       signOut: "ログアウト",
       signInPrompt:
         "ログインしてお気に入りのスポットを保存し、より多くの機能をお試しください。",
-      signInCreate: "ログイン / アカウント作成",
+      signInCreate: "Googleでログイン",
       freeSwipes: "無料スワイプ",
       remaining: "残り（本日）",
       used: "使用済み",
@@ -82,8 +82,8 @@ export const translations = {
     collectionGate: {
       title: "お気に入りはここに",
       desc: "ログインしてお気に入りのスポットを保存し、セッションをまたいで使えるコレクションを作りましょう。",
-      signInOrCreate: "ログイン / アカウント作成",
-      freeAndFast: "無料・30秒で登録",
+      signInOrCreate: "Googleでログイン",
+      freeAndFast: "パスワードはこのアプリに保存しません",
     },
     explore: {
       header: "探索",
@@ -110,7 +110,7 @@ export const translations = {
       signInToExplore: "サインインして探索",
       themeNeedsAccount:
         "{theme}を楽しむにはアカウントが必要です。お気に入りを保存してバイブを続けましょう。",
-      signInCreate: "ログイン / アカウント作成",
+      signInCreate: "Googleでログイン",
       notNow: "後で",
       dismiss: "閉じる",
       close: "閉じる",
@@ -132,7 +132,10 @@ export const translations = {
       resend: "確認メールを再送する",
       backToSignIn: "サインインに戻る",
       tagline: "次のお気に入りスポットを見つけよう",
-      afterSignIn: "サインイン後、テーマスワイプに戻ります。",
+      afterSignIn: "ログイン後、テーマスワイプに戻ります。",
+      googleSignIn: "Googleでログイン",
+      googleOnlyHint:
+        "ログインは Google だけです。パスワードはこのアプリに保存しません。",
       signIn: "サインイン",
       signUp: "新規登録",
       emailLabel: "メールアドレス",
@@ -150,7 +153,9 @@ export const translations = {
           "このメールアドレスはすでに登録されています。",
         passwordTooShort: "パスワードは6文字以上にしてください。",
         confirmationFailed:
-          "確認に失敗しました。リンクが期限切れの可能性があります。再度お試しください。",
+          "ログインに失敗しました。もう一度お試しください。",
+        googleFailed:
+          "Googleログインを開始できませんでした。しばらくしてから再度お試しください。",
       },
     },
     pro: {
@@ -270,7 +275,7 @@ export const translations = {
       signOut: "Sign out",
       signInPrompt:
         "Sign in to save your liked spots and unlock more features.",
-      signInCreate: "Sign in / Create account",
+      signInCreate: "Continue with Google",
       freeSwipes: "Free swipes",
       remaining: "left today",
       used: "used",
@@ -294,8 +299,8 @@ export const translations = {
     collectionGate: {
       title: "Your likes live here",
       desc: "Sign in to save your liked spots and build a personal collection that follows you across sessions.",
-      signInOrCreate: "Sign in or Create account",
-      freeAndFast: "Free & takes 30 seconds",
+      signInOrCreate: "Continue with Google",
+      freeAndFast: "We never store your password",
     },
     explore: {
       header: "EXPLORE",
@@ -319,7 +324,7 @@ export const translations = {
       signInToExplore: "Sign in to explore",
       themeNeedsAccount:
         "{theme} needs an account so we can save your likes and keep the vibe going.",
-      signInCreate: "Sign in / Create account",
+      signInCreate: "Continue with Google",
       notNow: "Not now",
       dismiss: "Dismiss",
       close: "Close",
@@ -341,6 +346,9 @@ export const translations = {
       backToSignIn: "Back to sign in",
       tagline: "Find your next favourite spot",
       afterSignIn: "After sign in you'll return to your themed swipe.",
+      googleSignIn: "Continue with Google",
+      googleOnlyHint:
+        "Sign-in is Google only. This app never stores your password.",
       signIn: "Sign in",
       signUp: "Sign up",
       emailLabel: "Email address",
@@ -356,8 +364,8 @@ export const translations = {
         userAlreadyRegistered:
           "An account with this email already exists.",
         passwordTooShort: "Password must be at least 6 characters.",
-        confirmationFailed:
-          "Confirmation failed — the link may have expired. Please try again.",
+        confirmationFailed: "Sign-in failed. Please try again.",
+        googleFailed: "Could not start Google sign-in. Please try again.",
       },
     },
     pro: {

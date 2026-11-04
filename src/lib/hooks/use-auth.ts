@@ -5,26 +5,12 @@ import type { Session, User } from "@supabase/supabase-js";
 import { safeInternalRedirect } from "@/lib/auth/safe-redirect";
 import { supabase } from "@/lib/supabase/client";
 
-interface AuthRedirectOptions {
-  /** Path to open after email confirmation (relative, e.g. /?theme=...) */
-  next?: string;
-}
-
 interface UseAuthReturn {
   user: User | null;
   session: Session | null;
   accessToken: string | null;
   isLoading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
-  signUp: (
-    email: string,
-    password: string,
-    options?: AuthRedirectOptions,
-  ) => Promise<{ error: string | null }>;
-  resendConfirmation: (
-    email: string,
-    options?: AuthRedirectOptions,
-  ) => Promise<{ error: string | null }>;
+  signInWithGoogle: (next?: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
 
@@ -63,36 +49,15 @@ export function useAuth(): UseAuthReturn {
     };
   }, []);
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const signInWithGoogle = useCallback(async (next?: string) => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: buildConfirmRedirectUrl(next),
+      },
+    });
     return { error: error?.message ?? null };
   }, []);
-
-  const signUp = useCallback(
-    async (email: string, password: string, options?: AuthRedirectOptions) => {
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: { emailRedirectTo: buildConfirmRedirectUrl(options?.next) },
-      });
-      return { error: error?.message ?? null };
-    },
-    [],
-  );
-
-  const resendConfirmation = useCallback(
-    async (email: string, options?: AuthRedirectOptions) => {
-      const { error } = await supabase.auth.resend({
-        type: "signup",
-        email,
-        options: {
-          emailRedirectTo: buildConfirmRedirectUrl(options?.next),
-        },
-      });
-      return { error: error?.message ?? null };
-    },
-    [],
-  );
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
@@ -103,9 +68,7 @@ export function useAuth(): UseAuthReturn {
     session,
     accessToken: session?.access_token ?? null,
     isLoading,
-    signIn,
-    signUp,
-    resendConfirmation,
+    signInWithGoogle,
     signOut,
   };
 }

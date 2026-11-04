@@ -36,7 +36,7 @@ function ConfirmContent() {
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-midnight px-6 text-center">
       <div className="size-10 animate-spin rounded-full border-2 border-surface-raised border-t-electric-chilli" />
-      <p className="text-sm text-text-muted">Confirming your account…</p>
+      <p className="text-sm text-text-muted">ログインしています…</p>
     </div>
   );
 }
