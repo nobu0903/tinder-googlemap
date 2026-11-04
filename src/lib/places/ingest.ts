@@ -664,14 +664,15 @@ export async function enrichSpotFromDetails(
   }
 
   // Photos-only FieldMask has no displayName — merge onto cache instead of mapPlaceToRow.
-  if (
-    forcePhotos &&
-    cleanedCached &&
-    fieldMask === DETAILS_PHOTOS_FIELD_MASK
-  ) {
+  if (cleanedCached && fieldMask === DETAILS_PHOTOS_FIELD_MASK) {
+    const freshPhotos = mapPhotosFromPlace(details);
     const photoOnly: SpotRow = {
       ...cleanedCached,
-      photos: mapPhotosFromPlace(details),
+      // Forced refresh means the cached names already 404 — never keep them.
+      photos:
+        forcePhotos || freshPhotos.length > 0
+          ? freshPhotos
+          : cleanedCached.photos,
       updated_at: new Date().toISOString(),
     };
     const { error } = await supabaseAdmin

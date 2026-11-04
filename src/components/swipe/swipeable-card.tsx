@@ -261,9 +261,9 @@ export function SwipeableCard({
           alt=""
           width={480}
           height={480}
+          sizes="260px"
           className="h-auto w-full drop-shadow-[0_4px_20px_rgba(0,0,0,0.55)]"
           draggable={false}
-          priority
         />
       </div>
 
@@ -277,9 +277,9 @@ export function SwipeableCard({
           alt=""
           width={520}
           height={300}
+          sizes="280px"
           className="h-auto w-full drop-shadow-[0_4px_20px_rgba(0,0,0,0.55)]"
           draggable={false}
-          priority
         />
       </div>
 
