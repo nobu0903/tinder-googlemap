@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  adminNotFound,
   adminSecretsMatch,
   attachAdminSessionCookie,
   clearAdminSessionCookie,
+  isLocalAdminEnabled,
   verifyAdminRequest,
 } from "@/lib/admin/auth";
 import { consumeRateLimit } from "@/lib/api/rate-limit";
@@ -12,10 +14,12 @@ import { consumeRateLimit } from "@/lib/api/rate-limit";
  * Returns 200 always (avoids noisy 401 in the browser console while gated).
  *
  * A signed cookie is issued only by POST with ADMIN_SECRET.
- * Development does not attach one on this GET: a dev server that is reachable
- * from the network must not become admin without the password.
+ * This route exists only on the local dev server. Production returns 404.
+ * Opening the page does not attach a cookie.
  */
 export async function GET(req: NextRequest) {
+  if (!isLocalAdminEnabled()) return adminNotFound();
+
   if (await verifyAdminRequest(req)) {
     return NextResponse.json({ authenticated: true });
   }
@@ -33,9 +37,11 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST /api/admin/session — unlock with password matching ADMIN_SECRET.
- * Used in production (or when cookie expired).
+ * Local dev server only.
  */
 export async function POST(req: NextRequest) {
+  if (!isLocalAdminEnabled()) return adminNotFound();
+
   const limit = await consumeRateLimit(req, "admin-login", {
     windowMs: 15 * 60 * 1000,
     maxPerWindow: 8,
@@ -85,6 +91,8 @@ export async function POST(req: NextRequest) {
 
 /** DELETE /api/admin/session — clear cookie */
 export async function DELETE() {
+  if (!isLocalAdminEnabled()) return adminNotFound();
+
   const res = NextResponse.json({ authenticated: false });
   clearAdminSessionCookie(res);
   return res;

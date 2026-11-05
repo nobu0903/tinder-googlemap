@@ -51,7 +51,7 @@ describe("verifyAdminRequest (BUG-014)", () => {
 
   it("accepts a signed session cookie and rejects the raw secret", async () => {
     vi.stubEnv("ADMIN_SECRET", "s3cret");
-    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("NODE_ENV", "development");
     const token = await createAdminSessionToken("s3cret");
     expect(await verifyAdminRequest(makeReq({ cookieSecret: "wrong" }))).toBe(
       false,
@@ -61,6 +61,19 @@ describe("verifyAdminRequest (BUG-014)", () => {
     );
     expect(await verifyAdminRequest(makeReq({ cookieSecret: token }))).toBe(
       true,
+    );
+  });
+
+  it("refuses every admin request on a production server", async () => {
+    vi.stubEnv("ADMIN_SECRET", "s3cret");
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("ALLOW_INSECURE_ADMIN", "1");
+    const token = await createAdminSessionToken("s3cret");
+    expect(await verifyAdminRequest(makeReq({ secretHeader: "s3cret" }))).toBe(
+      false,
+    );
+    expect(await verifyAdminRequest(makeReq({ cookieSecret: token }))).toBe(
+      false,
     );
   });
 

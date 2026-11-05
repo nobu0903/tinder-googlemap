@@ -8,6 +8,18 @@ const SESSION_TTL_SEC = 60 * 60 * 24 * 30;
 const SESSION_VERSION = "v1";
 
 /**
+ * Admin pages and APIs exist only on the local dev server.
+ * A public production deploy always answers 404, even with the right secret.
+ */
+export function isLocalAdminEnabled(): boolean {
+  return process.env.NODE_ENV !== "production";
+}
+
+export function adminNotFound(): NextResponse {
+  return NextResponse.json({ error: "Not Found" }, { status: 404 });
+}
+
+/**
  * Admin routes fail closed: ADMIN_SECRET is always required unless
  * ALLOW_INSECURE_ADMIN=1 in development (explicit local opt-in).
  *
@@ -16,6 +28,8 @@ const SESSION_VERSION = "v1";
  * createAdminSessionToken — a cookie equal to ADMIN_SECRET is rejected.
  */
 export async function verifyAdminRequest(req: Request): Promise<boolean> {
+  if (!isLocalAdminEnabled()) return false;
+
   const secret = process.env.ADMIN_SECRET?.trim();
   if (!secret) {
     return (
@@ -53,6 +67,7 @@ export async function createAdminSessionToken(
 }
 
 export function adminUnauthorized(): NextResponse {
+  if (!isLocalAdminEnabled()) return adminNotFound();
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 }
 

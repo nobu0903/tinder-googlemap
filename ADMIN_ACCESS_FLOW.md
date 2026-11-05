@@ -6,12 +6,12 @@
 
 | 名前 | 意味 |
 |------|------|
-| `ADMIN_SECRET` | `.env.local` / Vercel に置く秘密の文字列。サーバーだけが知る |
+| `ADMIN_SECRET` | `.env.local` に置く秘密の文字列。開発サーバーだけが使う |
 | Cookie `vl_admin` | Unlock 成功後にブラウザへ付く HttpOnly Cookie（JS からは読めない） |
 | `/admin` | 管理画面本体 |
-| `/ohyeswaitaminutemisterpostman` | 本番用の Unlock 入口（公開ナビには出さない。ブックマーク用） |
+| `/ohyeswaitaminutemisterpostman` | 自分の開発サーバーだけの Unlock 入口 |
 | `/api/admin/session` | ログイン状態の確認・Unlock・ログアウト用 API |
-| Middleware | 本番で「Cookie なしなら `/admin` を 404」にする門番 |
+| Middleware | 公開サイトでは管理画面もログイン画面も 404 にする門番 |
 | API の `verifyAdminRequest` | 各 admin API の本当の鍵チェック（Middleware より重要） |
 
 ---
@@ -20,32 +20,22 @@
 
 ```mermaid
 flowchart TB
-  subgraph public [一般ユーザー]
-    U[アプリ / スワイプなど]
+  subgraph public [公開サイト]
+    U[誰かが /admin やログイン用URLを開く]
+    MW[Middleware]
+    X[404]
+    U --> MW --> X
   end
 
-  subgraph gate [門番]
-    MW[Middleware<br/>本番のみ厳格]
-    APIAUTH[各 /api/admin/* の<br/>ADMIN_SECRET 検証]
+  subgraph local [自分の開発サーバー]
+    UNLOCK[Unlock 画面で ADMIN_SECRET]
+    PAGE["/admin"]
+    APIS["/api/admin/*"]
+    UNLOCK --> PAGE --> APIS
   end
-
-  subgraph admin [あなた専用]
-    UNLOCK["/ohyeswaitaminutemisterpostman<br/>Unlock 画面"]
-    PAGE["/admin<br/>管理画面"]
-    APIS["/api/admin/*<br/>キャッシュ・分析など"]
-  end
-
-  U -.->|URL を知っていても| MW
-  MW -->|Cookie なし → 404| X[Not Found]
-  MW -->|Cookie あり| PAGE
-  UNLOCK -->|正しい ADMIN_SECRET| COOKIE[Cookie vl_admin を付与]
-  COOKIE --> PAGE
-  PAGE --> APIS
-  APIS --> APIAUTH
-  APIAUTH -->|不一致 → 拒否| Y[拒否]
 ```
 
-**ポイント:** Middleware は「画面を隠す」役。データ操作の本当の守りは **API 側の秘密検証**です。
+**ポイント:** 公開サイトに管理画面はありません。見るときは自分のパソコンの開発サーバーだけです。
 
 ---
 
@@ -70,62 +60,15 @@ flowchart TD
 
 ---
 
-## 本番（production）— 初回 / Cookie 切れ
+## 公開サイト（production）
 
-`/admin` を直接開いても **404** になります。Unlock 用 URL から入ります。
-
-```mermaid
-flowchart TD
-  A["ブックマークした<br/>/ohyeswaitaminutemisterpostman を開く"] --> B[Unlock 画面で ADMIN_SECRET を入力]
-  B --> C[POST /api/admin/session]
-  C --> D{入力 == サーバーの ADMIN_SECRET ?}
-  D -->|いいえ| E[エラー表示<br/>Invalid password]
-  D -->|はい| F[HttpOnly Cookie vl_admin を付与]
-  F --> G[リダイレクト → /admin]
-  G --> H[Middleware: Cookie あり → 通過]
-  H --> I[管理画面を表示]
-```
-
-**あなたがやること:**
-
-1. Vercel に `ADMIN_SECRET` を設定する  
-2. `https://あなたのドメイン/ohyeswaitaminutemisterpostman` をブックマーク  
-3. そこで秘密を入力 → `/admin` へ  
-
-Cookie は約 **30 日**有効です。切れたら同じ Unlock URL から入り直します。
-
----
-
-## 本番 — 一般ユーザーが `/admin` を開いた場合
+管理画面も、パスワード欄も、管理用 API も出しません。合言葉が合っていても 404 です。人数を見るときは、自分のパソコンで `npm run dev` を動かします。ローカルの `.env.local` が本番のデータベースを指していれば、その人数が出ます。
 
 ```mermaid
 flowchart TD
-  A[誰かが /admin や /api/admin/cache にアクセス] --> B[Middleware]
-  B --> C{Cookie vl_admin が正しい？}
-  C -->|いいえ| D[404 Not Found<br/>存在しないように見える]
-  C -->|はい| E[中へ進む<br/>さらに API でも再検証]
+  A["誰かが /admin やログイン用URLや /api/admin を開く"] --> B[Middleware]
+  B --> C[404 Not Found]
 ```
-
-Unlock 画面は公開ナビに出ていません。URL を知らなければたどり着きにくいです（加えて秘密が必要）。
-
----
-
-## Middleware が通す / 弾くもの（本番）
-
-```mermaid
-flowchart TD
-  R[リクエスト] --> M{パスは？}
-  M -->|/api/admin/session| OK1[常に通過<br/>Unlock のため]
-  M -->|/admin など| C1{Cookie OK?}
-  M -->|その他 /api/admin/*| C2{Cookie OK?}
-  M -->|上記以外| OK2[対象外・通過]
-  C1 -->|Yes| OK3[通過]
-  C1 -->|No| F1[404]
-  C2 -->|Yes| OK4[通過]
-  C2 -->|No| F2[404 JSON]
-```
-
-開発時はこの図の前に「全部通過」があります。
 
 ---
 
@@ -144,23 +87,22 @@ flowchart LR
 
 | 層 | 役割 |
 |----|------|
-| Middleware | 本番で未ログインを 404 にして存在感を消す |
-| `/api/admin/*` の検証 | 実際の操作を拒否する本丸 |
-| Unlock URL の秘匿 | 入口をナビに出さない |
-| `ADMIN_SECRET` | 知っている人だけが Cookie を得られる |
+| Middleware | 公開サイトでは管理の入口をすべて 404 にする |
+| `/api/admin/*` の検証 | 公開サイトでは拒否し、開発サーバーでは秘密を確認する |
+| `ADMIN_SECRET` | 開発サーバーで知っている人だけが Cookie を得られる |
 
 ---
 
 ## よくある疑問
 
-**Q. `/admin` が 404 なのにどうやって入る？**  
-A. 本番は Unlock URL（`/ohyeswaitaminutemisterpostman`）だけが入口です。
+**Q. 公開サイトの `/admin` にはどうやって入る？**  
+A. 入れません。自分のパソコンで `npm run dev` したときだけ開けます。
 
 **Q. ローカルで Unlock URL は必要？**  
 A. `/admin` を開くと Unlock へ移ります。そこで `ADMIN_SECRET` を入れます。開いただけでは入れません。
 
 **Q. Save や Access の秘密入力は？**  
-A. 廃止済み。秘密は env のみ。本番の入力は Unlock 画面だけです。
+A. 廃止済み。秘密は env のみ。入力は開発サーバーの Unlock 画面だけです。
 
 **Q. 「アルゴリズム設定を本番に反映」は何？**  
 A. 認証とは無関係。フィード設定を本番 `/api/swipe` に保存するボタンです。

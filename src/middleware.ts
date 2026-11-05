@@ -1,47 +1,32 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { verifyAdminRequest } from "@/lib/admin/auth";
 
 /**
- * Hide /admin + /api/admin from the public internet in production.
- *
- * Development: pass-through so /admin can redirect to the unlock form.
- * The session GET does not issue a cookie; POST with ADMIN_SECRET does.
- * Production:
- *   - POST/GET/DELETE /api/admin/session always allowed (login / status / logout)
- *   - everything else under /admin or /api/admin requires a valid admin cookie
- *   - failures return 404 (not 401) so the surface does not advertise itself
- *
- * Real authorization remains verifyAdminRequest inside each API route.
+ * Admin exists only on the local dev server (`npm run dev`).
+ * Production always answers 404 for the screen, the unlock page, and the APIs.
+ * Each API still calls verifyAdminRequest, which also refuses production.
  */
 export async function middleware(req: NextRequest) {
-  if (process.env.NODE_ENV === "development") {
+  if (process.env.NODE_ENV !== "production") {
     return NextResponse.next();
   }
 
   const { pathname } = req.nextUrl;
-
-  // Chicken-and-egg: unlock must be able to check/set the session without a cookie.
-  if (pathname === "/api/admin/session") {
-    return NextResponse.next();
-  }
-
-  if (pathname === "/admin" || pathname.startsWith("/admin/")) {
-    if (await verifyAdminRequest(req)) return NextResponse.next();
-    return new NextResponse("Not Found", {
-      status: 404,
-      headers: { "content-type": "text/plain; charset=utf-8" },
-    });
-  }
-
   if (pathname.startsWith("/api/admin")) {
-    if (await verifyAdminRequest(req)) return NextResponse.next();
-    // Same status as a missing route — do not leak "Unauthorized".
     return NextResponse.json({ error: "Not Found" }, { status: 404 });
   }
 
-  return NextResponse.next();
+  return new NextResponse("Not Found", {
+    status: 404,
+    headers: { "content-type": "text/plain; charset=utf-8" },
+  });
 }
 
 export const config = {
-  matcher: ["/admin", "/admin/:path*", "/api/admin/:path*"],
+  matcher: [
+    "/admin",
+    "/admin/:path*",
+    "/api/admin/:path*",
+    "/ohyeswaitaminutemisterpostman",
+    "/ohyeswaitaminutemisterpostman/:path*",
+  ],
 };
