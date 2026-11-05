@@ -1,114 +1,189 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { Map as LeafletMap, Marker } from "leaflet";
 import { MapPin } from "lucide-react";
-import {
-  JAPAN_PREFECTURES,
-  type Municipality,
-  type Prefecture,
-} from "@/lib/japan-locations";
 import { useLang } from "@/lib/i18n/context";
 import type { Coordinates } from "@/lib/hooks/use-location";
+import "leaflet/dist/leaflet.css";
 
 interface LocationPickerProps {
   onConfirm: (coords: Coordinates, label: string) => void;
+  /** Map opens here. Tokyo when the user has no fix yet. */
+  initialCoords?: Coordinates | null;
+  onCancel?: () => void;
 }
 
-export function LocationPicker({ onConfirm }: LocationPickerProps) {
+const TOKYO: Coordinates = { lat: 35.6812, lng: 139.7671 };
+
+const PIN_HTML =
+  '<div style="width:18px;height:18px;border-radius:999px;background:#e03e00;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.45)"></div>';
+
+export function LocationPicker({
+  onConfirm,
+  initialCoords,
+  onCancel,
+}: LocationPickerProps) {
   const { t } = useLang();
-  const [prefectureId, setPrefectureId] = useState(
-    JAPAN_PREFECTURES[0]?.id ?? "",
-  );
-  const [municipalityId, setMunicipalityId] = useState("");
+  const startRef = useRef(initialCoords ?? TOKYO);
+  const mapNodeRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<LeafletMap | null>(null);
+  const markerRef = useRef<Marker | null>(null);
 
-  const prefecture = useMemo(
-    () => JAPAN_PREFECTURES.find((p) => p.id === prefectureId),
-    [prefectureId],
-  );
+  const [pin, setPin] = useState<Coordinates>(startRef.current);
+  const [placeLabel, setPlaceLabel] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
 
-  const municipalities = useMemo(
-    () => prefecture?.municipalities ?? [],
-    [prefecture],
-  );
+  useEffect(() => {
+    const node = mapNodeRef.current;
+    if (!node) return;
+    let cancelled = false;
+    let observer: ResizeObserver | null = null;
 
-  const selectedMunicipality: Municipality | undefined = useMemo(() => {
-    if (municipalityId) {
-      return municipalities.find((m) => m.id === municipalityId);
-    }
-    return municipalities[0];
-  }, [municipalityId, municipalities]);
+    void (async () => {
+      const leaflet = await import("leaflet");
+      if (cancelled) return;
+      const L = leaflet.default ?? leaflet;
+      const map = L.map(node, { zoomControl: true }).setView(
+        [startRef.current.lat, startRef.current.lng],
+        13,
+      );
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        maxZoom: 19,
+      }).addTo(map);
+      const marker = L.marker([startRef.current.lat, startRef.current.lng], {
+        icon: L.divIcon({
+          className: "",
+          html: PIN_HTML,
+          iconSize: [18, 18],
+          iconAnchor: [9, 9],
+        }),
+        keyboard: false,
+      }).addTo(map);
 
-  const handlePrefectureChange = (nextId: string) => {
-    setPrefectureId(nextId);
-    const nextPref = JAPAN_PREFECTURES.find((p) => p.id === nextId);
-    setMunicipalityId(nextPref?.municipalities[0]?.id ?? "");
+      map.on("click", (event) => {
+        marker.setLatLng(event.latlng);
+        setPin({ lat: event.latlng.lat, lng: event.latlng.lng });
+        setPlaceLabel(null);
+      });
+
+      if (cancelled) {
+        map.remove();
+        return;
+      }
+
+      mapRef.current = map;
+      markerRef.current = marker;
+      const resize = () => map.invalidateSize();
+      requestAnimationFrame(resize);
+      observer = new ResizeObserver(resize);
+      observer.observe(node);
+    })();
+
+    return () => {
+      cancelled = true;
+      observer?.disconnect();
+      mapRef.current?.remove();
+      mapRef.current = null;
+      markerRef.current = null;
+    };
+  }, []);
+
+  const movePin = (next: Coordinates, label: string) => {
+    setPin(next);
+    setPlaceLabel(label);
+    markerRef.current?.setLatLng([next.lat, next.lng]);
+    mapRef.current?.setView([next.lat, next.lng], 15);
   };
 
-  const handleConfirm = () => {
-    if (!prefecture || !selectedMunicipality) return;
-    onConfirm(
-      { lat: selectedMunicipality.lat, lng: selectedMunicipality.lng },
-      `${selectedMunicipality.name}, ${prefecture.name}`,
-    );
+  const handleSearch = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const q = query.trim();
+    if (!q || isSearching) return;
+    setSearchError(null);
+    setIsSearching(true);
+    try {
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`);
+      if (res.status === 404) {
+        setSearchError(t("location.notFound"));
+        return;
+      }
+      if (!res.ok) {
+        setSearchError(t("location.searchFailed"));
+        return;
+      }
+      const hit = (await res.json()) as { lat?: unknown; lng?: unknown; label?: unknown };
+      if (typeof hit.lat !== "number" || typeof hit.lng !== "number") {
+        setSearchError(t("location.searchFailed"));
+        return;
+      }
+      const label = typeof hit.label === "string" && hit.label ? hit.label : q;
+      movePin({ lat: hit.lat, lng: hit.lng }, label);
+    } catch {
+      setSearchError(t("location.searchFailed"));
+    } finally {
+      setIsSearching(false);
+    }
   };
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-6">
-      <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-surface p-5">
-        <div className="mb-4 flex items-center gap-2">
-          <MapPin className="size-5 text-electric-chilli" />
-          <div>
-            <p className="text-sm font-bold text-text-primary">
-              {t("location.chooseArea")}
-            </p>
-            <p className="text-[11px] text-text-muted">
-              {t("location.locationOff")}
-            </p>
-          </div>
+    <div className="flex min-h-0 w-full flex-1 flex-col">
+      <div className="mb-3 flex items-center gap-2">
+        <MapPin className="size-5 shrink-0 text-electric-chilli" />
+        <div>
+          <p className="text-sm font-bold text-text-primary">{t("location.chooseArea")}</p>
+          <p className="text-[11px] text-text-muted">{t("location.locationOff")}</p>
         </div>
+      </div>
 
-        <label className="mb-3 block">
-          <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-text-muted">
-            {t("location.prefecture")}
-          </span>
-          <select
-            value={prefectureId}
-            onChange={(e) => handlePrefectureChange(e.target.value)}
-            className="h-11 w-full rounded-xl border border-white/10 bg-surface-raised px-3 text-[13px] text-text-primary focus:border-electric-chilli/50 focus:outline-none"
-          >
-            {JAPAN_PREFECTURES.map((p: Prefecture) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </label>
+      <form onSubmit={handleSearch} className="mb-3 flex gap-2">
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={t("location.searchPlaceholder")}
+          maxLength={80}
+          className="h-11 min-w-0 flex-1 rounded-xl border border-white/10 bg-surface-raised px-3 text-[13px] text-text-primary placeholder:text-stealth focus:border-electric-chilli/50 focus:outline-none"
+        />
+        <button
+          type="submit"
+          disabled={isSearching || query.trim().length === 0}
+          className="h-11 shrink-0 rounded-xl border border-white/10 px-3 text-[13px] font-bold text-text-primary transition-opacity disabled:opacity-40"
+        >
+          {isSearching ? t("location.searching") : t("location.search")}
+        </button>
+      </form>
 
-        <label className="mb-5 block">
-          <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-text-muted">
-            {t("location.cityArea")}
-          </span>
-          <select
-            value={municipalityId || municipalities[0]?.id || ""}
-            onChange={(e) => setMunicipalityId(e.target.value)}
-            className="h-11 w-full rounded-xl border border-white/10 bg-surface-raised px-3 text-[13px] text-text-primary focus:border-electric-chilli/50 focus:outline-none"
-          >
-            {municipalities.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
-        </label>
+      {searchError ? (
+        <p className="mb-2 text-[12px] text-electric-chilli" role="alert">
+          {searchError}
+        </p>
+      ) : null}
 
+      <div
+        ref={mapNodeRef}
+        className="h-52 min-h-28 w-full flex-1 overflow-hidden rounded-xl border border-white/10 [&_.leaflet-container]:h-full [&_.leaflet-container]:w-full [&_.leaflet-container]:bg-surface-raised [&_.leaflet-tile]:max-w-none [&_.leaflet-tile-pane]:[filter:invert(1)_hue-rotate(180deg)_brightness(0.9)_contrast(0.9)]"
+      />
+
+      <button
+        type="button"
+        onClick={() => onConfirm(pin, placeLabel ?? t("location.pinnedArea"))}
+        className="mt-3 h-11 w-full shrink-0 rounded-xl bg-electric-chilli text-sm font-bold text-text-primary shadow-[0_4px_16px_rgba(224,62,0,0.35)] transition-transform active:scale-[0.98]"
+      >
+        {t("location.useThis")}
+      </button>
+      {onCancel ? (
         <button
           type="button"
-          onClick={handleConfirm}
-          className="h-11 w-full rounded-xl bg-electric-chilli text-sm font-bold text-text-primary shadow-[0_4px_16px_rgba(224,62,0,0.35)] transition-transform active:scale-[0.98]"
+          onClick={onCancel}
+          className="mt-2 shrink-0 text-center text-[12px] text-text-muted underline underline-offset-2"
         >
-          {t("location.useThis")}
+          {t("swipe.cancel")}
         </button>
-      </div>
+      ) : null}
     </div>
   );
 }

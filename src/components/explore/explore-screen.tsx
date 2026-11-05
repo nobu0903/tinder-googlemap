@@ -32,7 +32,10 @@ export function ExploreScreen() {
         <div className="min-h-0 flex-1 overflow-y-auto pb-24">
           {needsLocationPicker ? (
             <div className="mt-4 px-4">
-              <LocationPicker onConfirm={handleLocationConfirm} />
+              <LocationPicker
+                initialCoords={coords}
+                onConfirm={handleLocationConfirm}
+              />
             </div>
           ) : null}
 

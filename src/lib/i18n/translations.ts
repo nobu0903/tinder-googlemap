@@ -24,6 +24,7 @@ export const translations = {
       noSpotsDesc:
         "別の市区町村や地区をお試しください — 旅行モードでも使えます。",
       loadingMore: "さらに読み込み中…",
+      tryAgainLater: "しばらくしてから試してください",
       sparseTheme:
         "⚡ 近くのテーマスポットが少ないため、高評価のスポットも表示中",
       nearYou: "現在地付近",
@@ -63,6 +64,7 @@ export const translations = {
       upgradePro: "Proにアップグレード",
       more: "その他",
       sendFeedback: "フィードバックを送る",
+      howTo: "使い方",
       language: "言語",
     },
     collection: {
@@ -116,12 +118,17 @@ export const translations = {
       close: "閉じる",
     },
     location: {
-      chooseArea: "エリアを選択",
-      locationOff:
-        "位置情報がオフです。都道府県と市区町村を選択してください。",
+      chooseArea: "地図で場所を選ぶ",
+      locationOff: "地図をタップするか、地名で移動できます。",
+      searchPlaceholder: "吉祥寺、横浜…",
+      search: "検索",
+      searching: "検索中…",
+      notFound: "見つかりませんでした。",
+      searchFailed: "検索できませんでした。しばらくしてから再度お試しください。",
+      pinnedArea: "ピンの周辺",
       prefecture: "都道府県",
       cityArea: "市区町村",
-      useThis: "この場所を使用",
+      useThis: "この周辺で探す",
     },
     auth: {
       checkInbox: "メールをご確認ください",
@@ -243,6 +250,7 @@ export const translations = {
       noSpotsDesc:
         "Try a different city or neighborhood — great for travel mode.",
       loadingMore: "Loading more spots…",
+      tryAgainLater: "Please try again in a little while",
       sparseTheme:
         "⚡ Limited themed spots nearby — showing top-rated alternatives too",
       nearYou: "Near you",
@@ -282,6 +290,7 @@ export const translations = {
       upgradePro: "Upgrade to Pro",
       more: "More",
       sendFeedback: "Send feedback",
+      howTo: "How to use",
       language: "Language",
     },
     collection: {
@@ -330,11 +339,17 @@ export const translations = {
       close: "Close",
     },
     location: {
-      chooseArea: "Choose your area",
-      locationOff: "Location access is off. Pick a prefecture and city.",
+      chooseArea: "Choose on the map",
+      locationOff: "Tap the map, or search a place name.",
+      searchPlaceholder: "Kichijoji, Yokohama…",
+      search: "Search",
+      searching: "Searching…",
+      notFound: "No match.",
+      searchFailed: "Search failed. Please try again.",
+      pinnedArea: "Around this pin",
       prefecture: "Prefecture",
       cityArea: "City / Area",
-      useThis: "Use this location",
+      useThis: "Search around here",
     },
     auth: {
       checkInbox: "Check your inbox",
