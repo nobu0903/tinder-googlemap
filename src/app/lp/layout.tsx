@@ -18,7 +18,7 @@ const zenKaku = Zen_Kaku_Gothic_New({
 export const metadata: Metadata = {
   title: "メシどこ — スワイプで次のご飯を決める",
   description:
-    "いま居る場所の近くから、スワイプでお店を見つけよう。メシどこのランディングページ。",
+    "近くの飲食店をカードで見て、右で行きたい店、左で見送りを選べます。ブラウザだけで使えて、ログインなしでも1日10回までスワイプできます。",
 };
 
 export default function LpLayout({ children }: { children: React.ReactNode }) {

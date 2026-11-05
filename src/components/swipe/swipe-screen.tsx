@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MobileShell } from "@/components/layout/mobile-shell";
 import { BottomNav } from "@/components/layout/bottom-nav";
-import { WaitlistHeaderButton } from "@/components/waitlist/waitlist-header-button";
 import { SwipeCard } from "@/components/swipe/swipe-card";
 import { NativeAdCard } from "@/components/swipe/native-ad-card";
 import { SwipeActions } from "@/components/swipe/swipe-actions";
@@ -185,10 +184,20 @@ export function SwipeScreen() {
         }`}
       >
         <header className="relative mb-4 flex shrink-0 flex-col items-center">
-          <WaitlistHeaderButton className="absolute right-0 top-0" />
           <h1 className="text-sm font-bold tracking-[0.18em] text-electric-chilli drop-shadow-[0_0_8px_rgba(224,62,0,0.25)]">
             🔥 {t("nav.swipe")}
           </h1>
+          <nav className="mt-2 flex flex-wrap justify-center gap-x-3 text-[10px] text-text-muted">
+            <Link href="/lp" className="underline underline-offset-2 hover:text-text-primary">
+              {t("swipe.howTo")}
+            </Link>
+            <Link href="/privacy" className="underline underline-offset-2 hover:text-text-primary">
+              {t("swipe.privacy")}
+            </Link>
+            <Link href="/terms" className="underline underline-offset-2 hover:text-text-primary">
+              {t("swipe.terms")}
+            </Link>
+          </nav>
           {themeName && (
             <p className="mt-1.5 text-[11px] font-medium text-text-muted">
               {t("swipe.theme")}:{" "}
@@ -242,10 +251,10 @@ export function SwipeScreen() {
               {t("swipe.upgradeDesc")}
             </p>
             <Link
-              href="/pro"
+              href="/lp"
               className="mt-8 flex h-12 w-full max-w-[240px] items-center justify-center rounded-xl bg-electric-chilli text-sm font-bold text-text-primary shadow-[0_4px_20px_rgba(224,62,0,0.35)] transition-all active:scale-[0.98] hover:shadow-[0_6px_28px_rgba(224,62,0,0.5)]"
             >
-              {t("swipe.goPro")}
+              {t("swipe.readAbout")}
             </Link>
           </div>
         )}

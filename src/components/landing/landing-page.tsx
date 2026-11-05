@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Lock, MapPin, Navigation, Smartphone } from "lucide-react";
+import { ChevronDown, MapPin, Navigation, Smartphone } from "lucide-react";
 import { LP_ICONS, LP_PHOTOS, LP_SCREENS } from "@/lib/landing/assets";
 import { cn } from "@/lib/utils";
 
@@ -11,7 +11,7 @@ const ACCENT = "#DC7A2E";
 
 const NAV = [
   { href: "#features", label: "特徴" },
-  { href: "#how", label: "使い方" },
+  { href: "/guide", label: "使い方" },
   { href: "#pricing", label: "料金" },
   { href: "#faq", label: "FAQ" },
   { href: "/waitlist", label: "モバイル版" },
@@ -39,12 +39,12 @@ const FAQ_ITEMS = [
     a: "無料プランのフィード内にスポンサー枠が表示されることがあります。",
   },
   {
-    q: "Proはいつ公開されますか？",
-    a: "現在準備中です。公開準備が整い次第お知らせします。",
+    q: "右と左はどう違いますか？",
+    a: "行きたい店は右、今回は違う店は左です。画面のハートとバツでも同じ操作です。右にした店は「行きたい」として扱います。",
   },
   {
-    q: "スマホアプリはありますか？",
-    a: "ネイティブアプリ（iOS / Android）は準備中です。ウェイトリストにご登録いただくと、公開時にメールでお知らせします。",
+    q: "インストールは必要ですか？",
+    a: "不要です。メシどこはブラウザで使うウェブサービスです。スマホのホーム画面に置かなくても、このページからスワイプを始められます。",
   },
 ] as const;
 
@@ -54,6 +54,7 @@ export function LandingPage() {
       <LpHeader />
       <main>
         <HeroSection />
+        <AboutSection />
         <FeaturesSection />
         <HowSection />
         <PricingSection />
@@ -234,6 +235,52 @@ function LpHeader() {
   );
 }
 
+function AboutSection() {
+  return (
+    <section
+      id="about"
+      className="scroll-mt-24 border-t border-white/[0.04] px-5 py-20 sm:px-8"
+    >
+      <div className="mx-auto max-w-2xl space-y-5 text-[15px] leading-relaxed text-white/70">
+        <h2 className="lp-display text-3xl font-bold tracking-wide text-white">
+          メシどこでできること
+        </h2>
+        <p>
+          メシどこは、今いる場所の近くの飲食店を、カードを左右に動かして決めるウェブサービスです。店を検索する言葉が決まっていなくても、近くの店を1軒ずつ見て、今日行く店を選べます。
+        </p>
+        <p>
+          1枚のカードが1店です。店名、評価、口コミの件数、今の場所からの距離が出ます。写真がある店は写真も出ます。掲載は周辺の飲食店から選んでおり、営業中であることや空席があることは保証しません。行く前に、店の情報を確認してください。
+        </p>
+        <p>
+          行きたい店は右へ、今回は違う店は左へ動かします。画面のハートとバツでも同じです。右にした店は「行きたい」として扱います。左にした店は、この場所の続きのカードからは外れます。
+        </p>
+        <p>
+          ブラウザが現在地を聞いてきたら、許可するとその場所の近くからカードが出ます。位置情報を使わない場合は、地図や地名から探す場所を指定できます。別の街を見たいときは、場所を変えて検索し直します。
+        </p>
+        <p>
+          Googleでログインすると、右スワイプした店がコレクションに残ります。あとから見返し、地図アプリで開けます。ログインしていないあいだも、近くの店のスワイプはできます。コレクションへの保存は、ログインしたあとの操作が対象です。テーマを選んで探すときも、ログインが必要です。
+        </p>
+        <p>
+          無料では、日本時間の1日あたり10回までスワイプできます。日付が変わると回数は戻ります。広告のカードは、この10回には入りません。
+        </p>
+      </div>
+      <div className="mx-auto mt-12 grid max-w-4xl gap-8 sm:grid-cols-3">
+        {(
+          [
+            [LP_SCREENS.swipe, "スワイプ画面。右が行きたい店、左が見送りです。"],
+            [LP_SCREENS.explore, "テーマから店を探す画面です。ログインが必要です。"],
+            [LP_SCREENS.collection, "右にした店が残るコレクションです。"],
+          ] as const
+        ).map(([src, alt]) => (
+          <PhoneFrame key={src} className="relative mx-auto aspect-[9/19] w-full max-w-[220px]">
+            <Image src={src} alt={alt} fill className="object-cover object-top" sizes="220px" />
+          </PhoneFrame>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function HeroSection() {
   return (
     <section className="relative overflow-hidden px-5 pb-28 pt-16 sm:px-8 sm:pt-20 lg:pb-36 lg:pt-28">
@@ -254,7 +301,7 @@ function HeroSection() {
             スワイプで次のご飯を決める
           </h1>
           <p className="mt-5 max-w-md text-[15px] leading-relaxed text-white/55">
-            いま居る場所の近くから、気分に合うお店をサクッと見つけよう。
+            メシどこは、今いる場所の近くの飲食店をカードで見て、行きたい店を決めるウェブサービスです。インストールは不要で、ブラウザからそのまま使えます。
           </p>
 
           <div className="mt-9 flex flex-wrap items-center gap-3">
@@ -429,13 +476,13 @@ function HowSection() {
     {
       n: "01",
       title: "場所を決める",
-      desc: "現在地、または都道府県・市区町村を選ぶ",
+      desc: "現在地を許可するか、地図か地名で探す場所を指定します。",
       content: <LocationStepPreview />,
     },
     {
       n: "02",
       title: "スワイプする",
-      desc: "気になる店はハート、違う店はスキップ",
+      desc: "行きたい店は右、今回は違う店は左です。ハートとバツでも同じです。",
       content: (
         <Image
           src={LP_SCREENS.swipe}
@@ -449,7 +496,7 @@ function HowSection() {
     {
       n: "03",
       title: "行きたい店を保存する",
-      desc: "いいねした店はコレクションに残る",
+      desc: "Googleでログインすると、右にした店がコレクションに残ります。",
       content: (
         <Image
           src={LP_SCREENS.collection}
@@ -470,7 +517,7 @@ function HowSection() {
       <Reveal>
         <SectionHeading
           title="使い方はカンタン 3ステップ"
-          lead="場所を選んで、スワイプして、気になる店を残す。"
+          lead="場所を選んで、スワイプして、行きたい店を残します。"
         />
       </Reveal>
 
@@ -517,11 +564,11 @@ function PricingSection() {
       <Reveal>
         <SectionHeading
           title="無料で始められる"
-          lead="まずは無料プランで。もっと使いたくなったら Pro へ。"
+          lead="アカウントなしで、近くの店を1日10回までスワイプできます。"
         />
       </Reveal>
 
-      <div className="mx-auto mt-16 grid max-w-3xl gap-5 sm:grid-cols-2">
+      <div className="mx-auto mt-16 max-w-xl">
         <Reveal>
           <div className="flex h-full flex-col rounded-[1.75rem] border border-white/[0.08] bg-white/[0.025] p-8">
             <span
@@ -530,8 +577,10 @@ function PricingSection() {
             >
               FREE
             </span>
-            <h3 className="lp-display mt-5 text-xl font-bold">無料プラン</h3>
-            <p className="mt-2 text-sm text-white/50">1日10スワイプまで</p>
+            <h3 className="lp-display mt-5 text-xl font-bold">1日10回まで</h3>
+            <p className="mt-4 text-sm leading-relaxed text-white/60">
+              無料の回数は、日本時間の0時に戻ります。ログインしていなくても、近くの店のスワイプは始められます。右にした店をコレクションに残すときと、テーマから探すときは、Googleでのログインが必要です。
+            </p>
             <div className="mt-10 flex flex-1 items-center justify-center py-4">
               <div
                 className="relative flex size-24 items-center justify-center rounded-full"
@@ -553,47 +602,7 @@ function PricingSection() {
             </div>
           </div>
         </Reveal>
-
-        <Reveal>
-          <div
-            className="flex h-full flex-col rounded-[1.75rem] border bg-white/[0.025] p-8"
-            style={{ borderColor: `${ACCENT}88` }}
-          >
-            <span
-              className="inline-flex w-fit rounded-full border px-3 py-1 text-[10px] font-bold tracking-[0.14em]"
-              style={{ borderColor: ACCENT, color: ACCENT }}
-            >
-              COMING SOON
-            </span>
-            <h3 className="lp-display mt-5 text-xl font-bold">
-              Pro{" "}
-              <span className="text-sm font-semibold" style={{ color: ACCENT }}>
-                （準備中）
-              </span>
-            </h3>
-            <p className="mt-2 text-sm text-white/50">
-              スワイプ無制限でもっと自由に探せる
-            </p>
-            <div className="mt-10 flex flex-1 items-center justify-center py-4">
-              <div
-                className="flex size-24 items-center justify-center rounded-full"
-                style={{ backgroundColor: "var(--lp-accent-soft)" }}
-              >
-                <Lock
-                  className="size-11"
-                  style={{ color: ACCENT }}
-                  strokeWidth={1.4}
-                  aria-hidden
-                />
-              </div>
-            </div>
-          </div>
-        </Reveal>
       </div>
-
-      <p className="mt-8 text-center text-[11px] text-white/30">
-        ※ スワイプ回数は毎日0時にリセットされます。
-      </p>
     </section>
   );
 }
@@ -678,13 +687,6 @@ function FinalCtaSection() {
             今すぐ試す
             <span aria-hidden>→</span>
           </Link>
-          <Link
-            href="/waitlist"
-            className="mt-5 inline-flex items-center gap-1.5 text-[13px] text-white/45 transition-colors hover:text-white/75"
-          >
-            <Smartphone className="size-3.5" aria-hidden />
-            モバイル版のウェイトリストに登録
-          </Link>
         </div>
       </Reveal>
     </section>
@@ -711,14 +713,6 @@ function LpFooter() {
         <ul className="flex flex-wrap justify-center gap-x-8 gap-y-2 text-[11px] text-white/28">
           <li>
             <Link
-              href="/waitlist"
-              className="transition-colors hover:text-white/55"
-            >
-              モバイル版ウェイトリスト
-            </Link>
-          </li>
-          <li>
-            <Link
               href="/privacy"
               className="transition-colors hover:text-white/55"
             >
@@ -735,7 +729,7 @@ function LpFooter() {
           </li>
           <li>
             <a
-              href="mailto:kareta09badominton@gmail.com"
+              href="mailto:meshidoko123@gmail.com"
               className="transition-colors hover:text-white/55"
             >
               お問い合わせ

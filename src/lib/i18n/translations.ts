@@ -15,8 +15,12 @@ export const translations = {
       freeLimit: "無料上限",
       usedAllSwipes: "無料スワイプ {limit} 回を使い切りました",
       upgradeDesc:
-        "Proにアップグレードして無制限にスワイプできます。無料枠は毎日0時（日本時間）にリセットされます。",
+        "無料の回数は、日本時間の0時に戻ります。使い方は説明ページに書いてあります。",
       goPro: "Proへアップグレード",
+      howTo: "使い方",
+      privacy: "プライバシー",
+      terms: "利用規約",
+      readAbout: "サービスの説明",
       cancel: "キャンセル",
       couldNotLoad: "スポットを読み込めませんでした",
       searchAnotherArea: "別のエリアを検索",

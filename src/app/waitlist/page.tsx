@@ -7,6 +7,7 @@ export const metadata: Metadata = {
   title: "モバイル版ウェイトリスト — メシどこ",
   description:
     "メシどこのモバイルアプリ（iOS / Android）公開時にメールでお知らせします。",
+  robots: { index: false, follow: false },
 };
 
 export default function WaitlistPage() {

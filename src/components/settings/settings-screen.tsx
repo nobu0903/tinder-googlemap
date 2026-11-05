@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { Globe, LogOut, MessageSquare, Zap } from "lucide-react";
+import { BookOpen, Globe, LogOut, MessageSquare, Scale, Shield } from "lucide-react";
 import { MobileShell } from "@/components/layout/mobile-shell";
 import { BottomNav } from "@/components/layout/bottom-nav";
-import { WaitlistHeaderButton } from "@/components/waitlist/waitlist-header-button";
 import {
   SettingsRowButton,
   SettingsRowInfo,
@@ -82,13 +81,6 @@ export function SettingsScreen() {
             isLimitReached={isLimitReached}
             t={t}
           />
-          <SettingsRowLink
-            label={t("settings.upgradePro")}
-            icon={<Zap className="size-4 text-honey" />}
-            href="/pro"
-            labelClassName="font-semibold text-honey"
-            bordered
-          />
         </SettingsSection>
 
         <SettingsSection label={t("settings.language")}>
@@ -96,15 +88,33 @@ export function SettingsScreen() {
         </SettingsSection>
 
         <SettingsSection label={t("settings.more")}>
+            label={t("settings.howTo")}
+            icon={<BookOpen className="size-4 text-text-muted" />}
+            href="/lp"
+          />
+          <SettingsRowLink
+            label={t("settings.privacy")}
+            icon={<Shield className="size-4 text-text-muted" />}
+            href="/privacy"
+            bordered
+          />
+          <SettingsRowLink
+            label={t("settings.terms")}
+            icon={<Scale className="size-4 text-text-muted" />}
+            href="/terms"
+            bordered
+          />
           <SettingsRowLink
             label={t("settings.sendFeedback")}
             icon={<MessageSquare className="size-4 text-text-muted" />}
             href="/feedback"
+            bordered
           />
         </SettingsSection>
 
         <p className="mt-6 px-5 text-center text-[10px] text-neutral-700">
           VibeLoop v{APP_VERSION}
+            bordered
         </p>
       </main>
 

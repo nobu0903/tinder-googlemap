@@ -5,7 +5,7 @@ export default function robots(): MetadataRoute.Robots {
     rules: {
       userAgent: "*",
       allow: "/",
-      disallow: ["/admin", "/api/"],
+      disallow: ["/admin", "/api/", "/pro", "/waitlist", "/guide"],
     },
     sitemap: "https://meshidoko.com/sitemap.xml",
     host: "https://meshidoko.com",
