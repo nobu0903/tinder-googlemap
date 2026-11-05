@@ -16,6 +16,7 @@ import {
 } from "@/lib/geo/coordinates";
 import { ADMIN_UNLOCK_PATH } from "@/lib/admin/constants";
 import { adminFetch } from "@/lib/admin/client";
+import { AdminGrowthPanel } from "@/components/admin/admin-growth-panel";
 import { AdminSwipePanel } from "@/components/admin/admin-swipe-panel";
 import { AdminSnsCardPanel } from "@/components/admin/admin-sns-card-panel";
 
@@ -314,6 +315,7 @@ export function AdminScreen() {
             {error}
           </div>
         )}
+        <AdminGrowthPanel />
         {/* Settings info */}
         <section className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-4 text-xs text-neutral-400">
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-neutral-500">
