@@ -122,7 +122,15 @@ export function AdminSwipePanel({
             </div>
           )}
 
-          {!showLoading && !error && !currentSpot && (
+          {!showLoading && !error && !currentSpot && isRefetching && (
+            <div className="flex flex-1 items-center justify-center">
+              <p className="animate-pulse text-sm text-text-muted">
+                {t("swipe.loadingMore")}
+              </p>
+            </div>
+          )}
+
+          {!showLoading && !error && !currentSpot && !isRefetching && (
             <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
               <p className="text-sm font-semibold text-text-primary">
                 {t("swipe.noSpotsFound")}

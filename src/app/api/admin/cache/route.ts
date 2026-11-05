@@ -162,6 +162,15 @@ export async function DELETE(req: NextRequest) {
     });
   }
 
+  // Spot timestamps no longer gate Google fetches; clear that record too.
+  const { error: areaError } = await supabaseAdmin
+    .from("area_fetch_state")
+    .delete()
+    .neq("area_key", "");
+  if (areaError) {
+    console.error("[DELETE /api/admin/cache] area_fetch_state", areaError.message);
+  }
+
   const staleIso = new Date(0).toISOString();
   const { error, count } = await supabaseAdmin
     .from("spots")

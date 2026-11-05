@@ -16,10 +16,12 @@ import {
 } from "@/lib/feed/swipe-fetch-lock";
 import { openCurrentNativeAd } from "@/lib/ads/native-ad-opener";
 
-/** Refetch only when the queue is fully exhausted */
-const REFETCH_WHEN_EMPTY = true;
-/** Minimum gap between /api/swipe calls (ms) */
+/** Refetch once the queue is down to this many cards, without the 2-minute gap */
+const REFETCH_AT_REMAINING = 3;
+/** Minimum gap between /api/swipe calls when the queue is still above the line */
 const MIN_FEED_FETCH_INTERVAL_MS = 2 * 60 * 1000;
+/** Immediate follow-up fetches after a response that added no cards */
+const MAX_EXTRA_REFETCHES = 2;
 /** Cap Place Details hydrates per browser session (photos + booking) */
 const MAX_SESSION_HYDRATES = 16;
 
@@ -37,6 +39,10 @@ interface UseSwipeFeedReturn {
   isInitialLoading: boolean;
   isRefetching: boolean;
   error: string | null;
+  /** True while a follow-up fetch is waiting (empty deck shows "loading more") */
+  isWaiting: boolean;
+  /** Rate limit or the extra refetches are used up */
+  askToWait: boolean;
   /** True when a tag was requested but fewer than 6 vibe spots matched — classic fills in. */
   isSparseTheme: boolean;
   advance: () => void;
@@ -55,9 +61,17 @@ export function useSwipeFeed({
   const [isInitialLoading, setIsInitialLoading] = useState(false);
   const [isRefetching, setIsRefetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isWaiting, setIsWaiting] = useState(false);
+  const [askToWait, setAskToWait] = useState(false);
   const [isSparseTheme, setIsSparseTheme] = useState(false);
 
   const fetchingRef = useRef(false);
+  const extraRefetchesRef = useRef(0);
+  const busyUntilRef = useRef<number | null>(null);
+  const exhaustedRef = useRef(false);
+  const askToWaitRef = useRef(false);
+  const followUpRef = useRef(false);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queueRef = useRef<SwipeFeedItem[]>([]);
   const seenSpotIdsRef = useRef<Set<string>>(new Set());
   const hydrateRequestedRef = useRef<Set<string>>(new Set());
@@ -91,9 +105,24 @@ export function useSwipeFeed({
     setQueue([]);
     queueRef.current = [];
     lastFetchAtRef.current = 0;
+    extraRefetchesRef.current = 0;
+    busyUntilRef.current = null;
+    exhaustedRef.current = false;
+    askToWaitRef.current = false;
+    followUpRef.current = false;
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    retryTimerRef.current = null;
+    setIsWaiting(false);
+    setAskToWait(false);
     setError(null);
     setIsSparseTheme(false);
   }, [coords, coordsKey]);
+
+  useEffect(() => {
+    return () => {
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    };
+  }, []);
 
   // ── Page Visibility: pause all fetching when the tab is in the background ──
   const tabHiddenRef = useRef(false);
@@ -223,19 +252,34 @@ export function useSwipeFeed({
     // Pause when tab is hidden (e.g. user minimised browser or closed lid)
     if (tabHiddenRef.current) return;
     if (!enabledRef.current || fetchingRef.current) return;
+    if (exhaustedRef.current || askToWaitRef.current) return;
 
     const currentCoords = coordsRef.current;
     if (!currentCoords) return;
 
     const now = Date.now();
-    const isBackground = queueRef.current.length > 0;
+    const lowQueue = queueRef.current.length <= REFETCH_AT_REMAINING;
     if (
-      isBackground &&
+      !lowQueue &&
       now - lastFetchAtRef.current < MIN_FEED_FETCH_INTERVAL_MS
     ) {
       return;
     }
+    if (busyUntilRef.current !== null && now < busyUntilRef.current) {
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      setIsWaiting(true);
+      retryTimerRef.current = setTimeout(() => {
+        retryTimerRef.current = null;
+        setIsWaiting(false);
+        void fetchFeedRef.current();
+      }, busyUntilRef.current - now);
+      return;
+    }
 
+    const isFollowUp = followUpRef.current;
+    followUpRef.current = false;
+
+    const isBackground = queueRef.current.length > 0;
     fetchingRef.current = true;
     if (isBackground) setIsRefetching(true);
     else setIsInitialLoading(true);
@@ -259,6 +303,13 @@ export function useSwipeFeed({
         if (exclude.length > 0) {
           url.searchParams.set("exclude", exclude.join(","));
         }
+        const pending = queueRef.current
+          .filter((item): item is FeedSpot => !isFeedNativeAd(item))
+          .map((item) => item.spotId)
+          .slice(0, 100);
+        if (pending.length > 0) {
+          url.searchParams.set("pending", pending.join(","));
+        }
 
         const headers: HeadersInit = {};
         if (accessTokenRef.current) {
@@ -266,6 +317,9 @@ export function useSwipeFeed({
         }
 
         const res = await fetch(url.toString(), { headers });
+        if (res.status === 429) {
+          return { rateLimited: true as const, firstLoad: !isFollowUp && queueRef.current.length === 0 };
+        }
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           throw new Error(
@@ -278,24 +332,65 @@ export function useSwipeFeed({
         const newItems: SwipeFeedItem[] = data.spots ?? [];
         const vibeCount =
           typeof data.vibeSpotCount === "number" ? data.vibeSpotCount : null;
-        return { newItems, vibeCount };
+        return {
+          rateLimited: false as const,
+          newItems,
+          vibeCount,
+          exhausted: data.exhausted === true,
+          busyUntil: typeof data.busyUntil === "string" ? data.busyUntil : null,
+          searchFailed: data.searchFailed === true,
+        };
       });
+
+      if (result.rateLimited) {
+        if (result.firstLoad) {
+          throw new Error("Too many requests. Please slow down.");
+        }
+        askToWaitRef.current = true;
+        setAskToWait(true);
+        return;
+      }
 
       if (result.vibeCount !== null && tagRef.current) {
         setIsSparseTheme(result.vibeCount < 6);
       }
+      if (result.exhausted) exhaustedRef.current = true;
+      busyUntilRef.current = result.busyUntil ? Date.parse(result.busyUntil) : null;
 
-      setQueue((prev) => {
-        const inQueue = new Set(prev.map(feedItemKey));
-        const fresh = result.newItems.filter((item) => {
-          const key = feedItemKey(item);
-          if (isFeedNativeAd(item)) return !inQueue.has(key);
-          return !seenSpotIdsRef.current.has(key) && !inQueue.has(key);
-        });
-        return [...prev, ...fresh];
+      const inQueue = new Set(queueRef.current.map(feedItemKey));
+      const fresh = result.newItems.filter((item) => {
+        const key = feedItemKey(item);
+        if (isFeedNativeAd(item)) return !inQueue.has(key);
+        return !seenSpotIdsRef.current.has(key) && !inQueue.has(key);
       });
+      setQueue((prev) => [...prev, ...fresh]);
       lastFetchAtRef.current = Date.now();
       void lazyHydrateQueue();
+
+      const added = fresh.length;
+      if (added > 0) extraRefetchesRef.current = 0;
+      const stillLow = queueRef.current.length + added <= REFETCH_AT_REMAINING;
+      if (stillLow && added === 0 && isFollowUp) {
+        extraRefetchesRef.current += 1;
+      }
+      const usedUp = extraRefetchesRef.current >= MAX_EXTRA_REFETCHES;
+      if (stillLow && added === 0 && (usedUp || result.searchFailed && isFollowUp)) {
+        askToWaitRef.current = true;
+        setAskToWait(true);
+      } else if (!exhaustedRef.current && stillLow && added === 0) {
+        const waitMs =
+          busyUntilRef.current !== null
+            ? Math.max(0, busyUntilRef.current - Date.now())
+            : 400;
+        followUpRef.current = true;
+        if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+        setIsWaiting(true);
+        retryTimerRef.current = setTimeout(() => {
+          retryTimerRef.current = null;
+          setIsWaiting(false);
+          void fetchFeedRef.current();
+        }, waitMs);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load feed.");
     } finally {
@@ -325,10 +420,10 @@ export function useSwipeFeed({
   // Use coordsKey (not coords object) so GPS noise / new object identity does not double-fetch.
   useEffect(() => {
     if (!enabled || !coords) return;
-    const shouldFetch = REFETCH_WHEN_EMPTY
-      ? queue.length === 0
-      : queue.length <= 3;
-    if (shouldFetch && !fetchingRef.current) {
+    if (exhaustedRef.current || askToWaitRef.current) return;
+    if (queue.length > REFETCH_AT_REMAINING) return;
+    if (busyUntilRef.current !== null && Date.now() < busyUntilRef.current) return;
+    if (!fetchingRef.current) {
       void fetchFeedRef.current();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -380,6 +475,8 @@ export function useSwipeFeed({
     queueLength: queue.length,
     isInitialLoading,
     isRefetching,
+    isWaiting,
+    askToWait,
     error,
     isSparseTheme,
     advance,

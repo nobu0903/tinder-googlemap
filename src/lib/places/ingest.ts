@@ -17,11 +17,15 @@ import {
 } from "@/lib/places/dining-filter";
 import { CHAIN_PRIMARY_TYPES } from "@/lib/places/chain-filter";
 import {
-  ingestAreaKey,
-  isIngestOnCooldown,
-  markIngestCompleted,
-} from "@/lib/places/ingest-cooldown";
+  AreaFetchSession,
+  MAX_TEXT_SEARCH_PAGES,
+  areaFetchKey,
+  isRetryDue,
+  nextRetryAfter,
+  type AreaFetchState,
+} from "@/lib/places/area-fetch-state";
 import { DEFAULT_FEED_CONFIG } from "@/lib/feed/config";
+import { passesReviewGate, reviewGateOrFilter } from "@/lib/feed/review-gate";
 import {
   DETAILS_FULL_FIELD_MASK,
   DETAILS_PHOTOS_FIELD_MASK,
@@ -34,19 +38,15 @@ import {
 const GOOGLE_PLACES_BASE = "https://places.googleapis.com/v1";
 /** Days before a cached spot is considered stale for freshness queries */
 export const CACHE_TTL_DAYS = 30;
-/** Minimum review count to cache — matches feed noise floor (60) */
+/** Full review floor for caching — matches the feed (see review-gate for 20–59) */
 const MIN_CACHE_REVIEW_COUNT = DEFAULT_FEED_CONFIG.vibeMinReviews;
 const MIN_CACHED_SPOTS = 20;
 /** Minimum vibe-range spots in cache before skipping supplemental ingest */
 const MIN_VIBE_CACHED_SPOTS = 15;
-/** Production: skip repeat nearby ingest if box had any upsert within this window */
-const PRODUCTION_INGEST_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
-/**
- * When the area already has enough total spots but vibe (hidden-gem) count is low,
- * allow one DISTANCE Nearby refresh at most once per this window. Much shorter than
- * the full ingest cooldown so feeds don't stay stuck on the same famous-heavy cache.
- */
-const VIBE_REFRESH_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+/** A Google search that takes longer than this counts as failed */
+const PLACES_SEARCH_TIMEOUT_MS = 8_000;
+/** Production Text Search query — measured to return dining spots Nearby misses */
+const PRODUCTION_TEXT_QUERY = "飲食店";
 
 /** Chain-heavy types + top-level lodging types for searchNearby (Table A only) */
 const EXCLUDED_PRIMARY_TYPES = [
@@ -111,6 +111,25 @@ const SEARCH_FIELD_MASK = [
   "places.currentOpeningHours",
   "places.location",
 ].join(",");
+
+/** Text Search paging adds only the token (Essentials field) */
+const TEXT_SEARCH_FIELD_MASK = `${SEARCH_FIELD_MASK},nextPageToken`;
+
+/** Google search failed or timed out — callers must not record it as a success. */
+export class PlacesSearchError extends Error {
+  readonly status: number | null;
+
+  constructor(message: string, status: number | null) {
+    super(message);
+    this.name = "PlacesSearchError";
+    this.status = status;
+  }
+}
+
+interface PlacesSearchResponse {
+  places?: GooglePlacesPlace[];
+  nextPageToken?: string;
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -277,57 +296,58 @@ async function fetchPlaceDetails(
   return (await res.json()) as GooglePlacesPlace;
 }
 
-async function fetchNearbyPlacesByType(
-  lat: number,
-  lng: number,
-  radiusMeters: number,
-  includedType: string,
-): Promise<GooglePlacesPlace[]> {
-  const body = {
-    includedTypes: [includedType],
-    excludedTypes: ["lodging"],
-    excludedPrimaryTypes: EXCLUDED_PRIMARY_TYPES,
-    maxResultCount: 20,
-    languageCode: "ja",
-    locationRestriction: {
-      circle: {
-        center: { latitude: lat, longitude: lng },
-        radius: Math.min(radiusMeters, 50_000),
+/**
+ * POST a Places search. Throws PlacesSearchError on HTTP errors, network
+ * errors, and timeouts so a failure is never mistaken for "no places".
+ * Not cached: the area fetch state decides when to search again.
+ */
+async function postPlacesSearch(
+  endpoint: "searchNearby" | "searchText",
+  body: Record<string, unknown>,
+  fieldMask: string,
+  label: string,
+): Promise<PlacesSearchResponse> {
+  let res: Response;
+  try {
+    res = await fetch(`${GOOGLE_PLACES_BASE}/places:${endpoint}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": getApiKey(),
+        "X-Goog-FieldMask": fieldMask,
       },
-    },
-  };
-
-  const res = await fetch(`${GOOGLE_PLACES_BASE}/places:searchNearby`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": getApiKey(),
-      "X-Goog-FieldMask": SEARCH_FIELD_MASK,
-    },
-    body: JSON.stringify(body),
-    next: { revalidate: 3600 },
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    console.warn(
-      `[ingest] searchNearby(${includedType}) failed ${res.status}: ${text}`,
-    );
-    return [];
+      body: JSON.stringify(body),
+      cache: "no-store",
+      signal: AbortSignal.timeout(PLACES_SEARCH_TIMEOUT_MS),
+    });
+  } catch (err) {
+    const reason =
+      err instanceof Error && err.name === "TimeoutError"
+        ? `timed out after ${PLACES_SEARCH_TIMEOUT_MS}ms`
+        : err instanceof Error
+          ? err.message
+          : "network error";
+    throw new PlacesSearchError(`[ingest] ${label} ${reason}`, null);
   }
 
-  const data = await res.json();
-  return (data.places ?? []) as GooglePlacesPlace[];
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new PlacesSearchError(
+      `[ingest] ${label} failed ${res.status}: ${text.slice(0, 500)}`,
+      res.status,
+    );
+  }
+
+  return (await res.json()) as PlacesSearchResponse;
 }
 
-/** Single nearby request with multiple types — 1 API call instead of N */
-async function fetchNearbyPlacesCombined(
+function nearbyBody(
   lat: number,
   lng: number,
   radiusMeters: number,
   includedTypes: string[],
   rankPreference?: "POPULARITY" | "DISTANCE",
-): Promise<GooglePlacesPlace[]> {
+): Record<string, unknown> {
   const body: Record<string, unknown> = {
     includedTypes,
     excludedTypes: ["lodging"],
@@ -343,40 +363,61 @@ async function fetchNearbyPlacesCombined(
   };
   // DISTANCE surfaces nearer / less prominence-biased spots (better for gems)
   if (rankPreference) body.rankPreference = rankPreference;
-
-  const res = await fetch(`${GOOGLE_PLACES_BASE}/places:searchNearby`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": getApiKey(),
-      "X-Goog-FieldMask": SEARCH_FIELD_MASK,
-    },
-    body: JSON.stringify(body),
-    next: { revalidate: 3600 },
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    console.warn(
-      `[ingest] searchNearby(combined) failed ${res.status}: ${text}`,
-    );
-    return [];
-  }
-
-  const data = await res.json();
-  return (data.places ?? []) as GooglePlacesPlace[];
+  return body;
 }
 
-async function fetchTextSearchPlaces(
+/** Single nearby request with multiple types — 1 API call instead of N */
+async function fetchNearbyPlacesCombined(
+  lat: number,
+  lng: number,
+  radiusMeters: number,
+  includedTypes: string[],
+  rankPreference?: "POPULARITY" | "DISTANCE",
+): Promise<GooglePlacesPlace[]> {
+  const data = await postPlacesSearch(
+    "searchNearby",
+    nearbyBody(lat, lng, radiusMeters, includedTypes, rankPreference),
+    SEARCH_FIELD_MASK,
+    "searchNearby(combined)",
+  );
+  return data.places ?? [];
+}
+
+/** Admin per-type discovery: one failed type is logged and skipped. */
+async function fetchNearbyPlacesByType(
+  lat: number,
+  lng: number,
+  radiusMeters: number,
+  includedType: string,
+): Promise<GooglePlacesPlace[]> {
+  try {
+    const data = await postPlacesSearch(
+      "searchNearby",
+      nearbyBody(lat, lng, radiusMeters, [includedType]),
+      SEARCH_FIELD_MASK,
+      `searchNearby(${includedType})`,
+    );
+    return data.places ?? [];
+  } catch (err) {
+    if (!(err instanceof PlacesSearchError)) throw err;
+    console.warn(err.message);
+    return [];
+  }
+}
+
+/** One Text Search page (DISTANCE, rectangle around the circle). */
+async function fetchTextSearchPage(
   lat: number,
   lng: number,
   radiusMeters: number,
   textQuery: string,
-): Promise<GooglePlacesPlace[]> {
+  pageToken?: string,
+): Promise<{ places: GooglePlacesPlace[]; nextPageToken: string | null }> {
   const box = boundingBox(lat, lng, radiusMeters);
-  const body = {
+  const body: Record<string, unknown> = {
     textQuery,
     pageSize: 20,
+    languageCode: "ja",
     rankPreference: "DISTANCE",
     locationRestriction: {
       rectangle: {
@@ -385,28 +426,32 @@ async function fetchTextSearchPlaces(
       },
     },
   };
+  if (pageToken) body.pageToken = pageToken;
 
-  const res = await fetch(`${GOOGLE_PLACES_BASE}/places:searchText`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": getApiKey(),
-      "X-Goog-FieldMask": SEARCH_FIELD_MASK,
-    },
-    body: JSON.stringify(body),
-    next: { revalidate: 3600 },
-  });
+  const data = await postPlacesSearch(
+    "searchText",
+    body,
+    TEXT_SEARCH_FIELD_MASK,
+    `searchText("${textQuery}")`,
+  );
+  return { places: data.places ?? [], nextPageToken: data.nextPageToken ?? null };
+}
 
-  if (!res.ok) {
-    const text = await res.text();
-    console.warn(
-      `[ingest] searchText("${textQuery}") failed ${res.status}: ${text}`,
-    );
+/** Admin text discovery: first page only; a failed query is logged and skipped. */
+async function fetchTextSearchPlaces(
+  lat: number,
+  lng: number,
+  radiusMeters: number,
+  textQuery: string,
+): Promise<GooglePlacesPlace[]> {
+  try {
+    const page = await fetchTextSearchPage(lat, lng, radiusMeters, textQuery);
+    return page.places;
+  } catch (err) {
+    if (!(err instanceof PlacesSearchError)) throw err;
+    console.warn(err.message);
     return [];
   }
-
-  const data = await res.json();
-  return (data.places ?? []) as GooglePlacesPlace[];
 }
 
 function mergeUniquePlaces(batches: GooglePlacesPlace[][]): GooglePlacesPlace[] {
@@ -809,23 +854,7 @@ export async function countAvailableSpots(
   return (data ?? []).filter((row) => !excludedIds.includes(row.id)).length;
 }
 
-/** True when any spot in the box was written recently (DB-backed ingest cooldown). */
-async function hadRecentIngestInBox(box: BoundingBox): Promise<boolean> {
-  const since = new Date(Date.now() - PRODUCTION_INGEST_COOLDOWN_MS).toISOString();
-  const { data } = await supabaseAdmin
-    .from("spots")
-    .select("id")
-    .gte("lat", box.minLat)
-    .lte("lat", box.maxLat)
-    .gte("lng", box.minLng)
-    .lte("lng", box.maxLng)
-    .gt("updated_at", since)
-    .limit(1);
-
-  return (data?.length ?? 0) > 0;
-}
-
-/** Count vibe-range spots in the bounding box. */
+/** Count vibe-range spots (passing the review gate) in the bounding box. */
 export async function countVibeSpotsInBox(
   box: BoundingBox,
   vibeMin: number,
@@ -841,40 +870,23 @@ export async function countVibeSpotsInBox(
     .lte("lat", box.maxLat)
     .gte("lng", box.minLng)
     .lte("lng", box.maxLng)
-    .gte("user_rating_count", vibeMin)
+    .or(reviewGateOrFilter(vibeMin))
     .lte("user_rating_count", vibeMax);
 
   if (freshOnly) {
     query = query.gt("updated_at", staleThresholdIso());
   }
 
-  const { data } = await query;
+  const { data, error } = await query;
+  if (error) throw new Error(`Supabase vibe count failed: ${error.message}`);
   return (data ?? []).filter((row) => !excludedIds.includes(row.id)).length;
 }
 
-/** DB-backed cooldown for gem-targeted refreshes (24h). */
-async function hadRecentVibeRefreshInBox(
-  box: BoundingBox,
-  vibeMax: number,
-): Promise<boolean> {
-  const since = new Date(Date.now() - VIBE_REFRESH_COOLDOWN_MS).toISOString();
-  const { data } = await supabaseAdmin
-    .from("spots")
-    .select("id")
-    .gte("lat", box.minLat)
-    .lte("lat", box.maxLat)
-    .gte("lng", box.minLng)
-    .lte("lng", box.maxLng)
-    .lte("user_rating_count", vibeMax)
-    .gt("updated_at", since)
-    .limit(1);
-
-  return (data?.length ?? 0) > 0;
-}
-
 function meetsCacheReviewFloor(place: GooglePlacesPlace): boolean {
-  const count = place.userRatingCount;
-  return count !== undefined && count !== null && count >= MIN_CACHE_REVIEW_COUNT;
+  return passesReviewGate(
+    { user_rating_count: place.userRatingCount, rating: place.rating },
+    MIN_CACHE_REVIEW_COUNT,
+  );
 }
 
 function meetsReviewCeiling(
@@ -931,7 +943,9 @@ async function upsertPlacesFromGoogle(
 export interface IngestResult {
   ingested: number;
   apiCalls: IngestApiCalls;
-  skippedReason?: "cooldown" | "sufficient_cache";
+  skippedReason?: "cooldown" | "sufficient_cache" | "busy";
+  /** A Google search failed or timed out; nothing was recorded as fetched */
+  failed?: boolean;
 }
 
 export interface IngestOptions {
@@ -948,14 +962,17 @@ export interface IngestOptions {
   vibeMinReviews?: number;
   vibeMaxReviews?: number;
   minVibeSpots?: number;
+  /** Shared per-request area state; created (and finished) here when omitted */
+  session?: AreaFetchSession;
 }
 
 /**
  * Ensure the Supabase cache is populated for the given radius.
  *
  * Production:
- * - Cold area (<20 spots): 1× Nearby (7-day cooldown)
- * - Vibe-scarce area: 1× DISTANCE Nearby, save only ≤vibeMax reviews (24h cooldown)
+ * - Cold area (<20 spots): 1× Nearby, then wait (area_fetch_state.primary_retry_after)
+ * - Vibe-scarce area: 1× DISTANCE Nearby, save only ≤vibeMax reviews
+ *   (area_fetch_state.vibe_retry_after)
  * Admin: per-type nearby + text search when vibe spots are scarce.
  */
 export async function ensureSpotsCached(opts: IngestOptions): Promise<IngestResult> {
@@ -968,7 +985,7 @@ export async function ensureSpotsCached(opts: IngestOptions): Promise<IngestResu
     ingestProfile = "production",
     bypassCooldown = false,
     vibeMinReviews = 60,
-    vibeMaxReviews = 300,
+    vibeMaxReviews = 600,
     minVibeSpots = MIN_VIBE_CACHED_SPOTS,
   } = opts;
   const apiCalls: IngestApiCalls = { ...EMPTY_INGEST_API_CALLS };
@@ -993,27 +1010,67 @@ export async function ensureSpotsCached(opts: IngestOptions): Promise<IngestResu
     return { ingested: 0, apiCalls, skippedReason: "sufficient_cache" };
   }
 
-  const areaKey = ingestAreaKey(lat, lng, radiusMeters);
-  const vibeAreaKey = `${areaKey}:vibe`;
   const vibeOnlyRefresh = needsVibeDiversity && !needsPrimary;
+  const usesAreaState = !forceFetch && !bypassCooldown;
+  const ownSession =
+    usesAreaState && !opts.session
+      ? new AreaFetchSession(areaFetchKey(lat, lng, radiusMeters))
+      : null;
+  const session = usesAreaState ? (opts.session ?? ownSession) : null;
 
-  if (!forceFetch && !bypassCooldown) {
-    if (vibeOnlyRefresh) {
-      // Short cooldown — unlock new gems without waiting a full week
-      if (
-        isIngestOnCooldown(vibeAreaKey) ||
-        (await hadRecentVibeRefreshInBox(box, vibeMaxReviews))
-      ) {
-        markIngestCompleted(vibeAreaKey);
+  try {
+    if (session) {
+      const state = await session.current();
+      const retryAfter = vibeOnlyRefresh ? state.vibeRetryAfter : state.primaryRetryAfter;
+      if (!isRetryDue(retryAfter)) {
         return { ingested: 0, apiCalls, skippedReason: "cooldown" };
       }
-    } else if (ingestProfile === "production" || needsPrimary) {
-      if (isIngestOnCooldown(areaKey) || (await hadRecentIngestInBox(box))) {
-        markIngestCompleted(areaKey);
-        return { ingested: 0, apiCalls, skippedReason: "cooldown" };
+      if (!(await session.acquire())) {
+        return { ingested: 0, apiCalls, skippedReason: "busy" };
       }
     }
+
+    return await discoverAndSave({
+      lat,
+      lng,
+      radiusMeters,
+      ingestProfile,
+      needsVibeDiversity,
+      vibeOnlyRefresh,
+      vibeMaxReviews,
+      forceFetch,
+      apiCalls,
+      session,
+    });
+  } finally {
+    await ownSession?.finish();
   }
+}
+
+async function discoverAndSave(args: {
+  lat: number;
+  lng: number;
+  radiusMeters: number;
+  ingestProfile: IngestProfile;
+  needsVibeDiversity: boolean;
+  vibeOnlyRefresh: boolean;
+  vibeMaxReviews: number;
+  forceFetch: boolean;
+  apiCalls: IngestApiCalls;
+  session: AreaFetchSession | null;
+}): Promise<IngestResult> {
+  const {
+    lat,
+    lng,
+    radiusMeters,
+    ingestProfile,
+    needsVibeDiversity,
+    vibeOnlyRefresh,
+    vibeMaxReviews,
+    forceFetch,
+    apiCalls,
+    session,
+  } = args;
 
   const useTextSearch =
     ingestProfile === "admin" && (needsVibeDiversity || forceFetch);
@@ -1021,25 +1078,139 @@ export async function ensureSpotsCached(opts: IngestOptions): Promise<IngestResu
   const nearbyTypes =
     ingestProfile === "admin" ? ADMIN_NEARBY_TYPES : PRODUCTION_NEARBY_TYPES;
 
-  const places = await discoverDiversePlaces(lat, lng, radiusMeters, {
-    nearbyTypes,
-    textSearch: useTextSearch,
-    combinedNearby: ingestProfile === "production",
-    // Hunt nearer / less famous spots when topping up gems
-    rankPreference: vibeOnlyRefresh || needsVibeDiversity ? "DISTANCE" : undefined,
-    apiCalls,
-  });
-
-  if (places.length === 0) {
-    return { ingested: 0, apiCalls };
+  let places: GooglePlacesPlace[];
+  try {
+    places = await discoverDiversePlaces(lat, lng, radiusMeters, {
+      nearbyTypes,
+      textSearch: useTextSearch,
+      combinedNearby: ingestProfile === "production",
+      // Hunt nearer / less famous spots when topping up gems
+      rankPreference: vibeOnlyRefresh || needsVibeDiversity ? "DISTANCE" : undefined,
+      apiCalls,
+    });
+  } catch (err) {
+    if (!(err instanceof PlacesSearchError)) throw err;
+    console.warn(err.message);
+    return { ingested: 0, apiCalls, failed: true };
   }
 
   // Vibe refresh: do not write mega-famous places into the cache
-  const ingested = await upsertPlacesFromGoogle(
-    places,
-    vibeOnlyRefresh ? { maxReviews: vibeMaxReviews } : undefined,
-  );
-  markIngestCompleted(vibeOnlyRefresh ? vibeAreaKey : areaKey);
+  const ingested =
+    places.length > 0
+      ? await upsertPlacesFromGoogle(
+          places,
+          vibeOnlyRefresh ? { maxReviews: vibeMaxReviews } : undefined,
+        )
+      : 0;
+
+  // Recorded only after the save succeeded, so a failed write retries next time.
+  // One Nearby per wait, whichever reason triggered it. Leaving the other
+  // column empty would let the next request call Google again immediately.
+  const retryAfter = nextRetryAfter(places.length);
+  session?.record({ primaryRetryAfter: retryAfter, vibeRetryAfter: retryAfter });
 
   return { ingested, apiCalls };
+}
+
+export interface TextPagingResult {
+  ingested: number;
+  pagesFetched: number;
+  apiCalls: IngestApiCalls;
+  skippedReason?: "cooldown" | "busy";
+  failed?: boolean;
+}
+
+/** True when this area's Text Search pages are all used and the wait has not passed. */
+export function isTextSearchExhausted(state: AreaFetchState, now = Date.now()): boolean {
+  return state.textNextPageToken === null && !isRetryDue(state.textRetryAfter, now);
+}
+
+/**
+ * Fetch the next Text Search pages for an area (DISTANCE order, up to 3 pages
+ * of 20 in total) and save spots that pass the dining and review filters.
+ * Stops early once `shouldStop` reports enough cards. The page token is kept
+ * in area_fetch_state so the next request continues where this one stopped.
+ */
+export async function fetchTextSearchPagesIntoCache(opts: {
+  lat: number;
+  lng: number;
+  radiusMeters: number;
+  session: AreaFetchSession;
+  shouldStop: () => Promise<boolean>;
+}): Promise<TextPagingResult> {
+  const { lat, lng, radiusMeters, session, shouldStop } = opts;
+  const apiCalls: IngestApiCalls = { ...EMPTY_INGEST_API_CALLS };
+
+  const state = await session.current();
+  const continuing = state.textNextPageToken !== null;
+  if (!continuing && !isRetryDue(state.textRetryAfter)) {
+    return { ingested: 0, pagesFetched: 0, apiCalls, skippedReason: "cooldown" };
+  }
+  if (!(await session.acquire())) {
+    return { ingested: 0, pagesFetched: 0, apiCalls, skippedReason: "busy" };
+  }
+
+  let token = state.textNextPageToken;
+  let pagesFetched = continuing ? state.textPagesFetched : 0;
+  let restartedExpiredToken = false;
+  let chainHadPlaces = continuing;
+  let ingested = 0;
+  let pagesThisRequest = 0;
+  let failed = false;
+
+  while (pagesFetched < MAX_TEXT_SEARCH_PAGES) {
+    let page: { places: GooglePlacesPlace[]; nextPageToken: string | null };
+    try {
+      apiCalls.textSearch += 1;
+      page = await fetchTextSearchPage(
+        lat,
+        lng,
+        radiusMeters,
+        PRODUCTION_TEXT_QUERY,
+        token ?? undefined,
+      );
+    } catch (err) {
+      if (!(err instanceof PlacesSearchError)) throw err;
+      // A stored token Google no longer accepts: start the list again once.
+      if (token && err.status === 400 && !restartedExpiredToken) {
+        console.warn(`${err.message} — restarting Text Search from page 1`);
+        restartedExpiredToken = true;
+        token = null;
+        pagesFetched = 0;
+        chainHadPlaces = false;
+        continue;
+      }
+      console.warn(err.message);
+      failed = true;
+      break;
+    }
+
+    pagesFetched += 1;
+    pagesThisRequest += 1;
+    if (page.places.length > 0) chainHadPlaces = true;
+    if (page.places.length > 0) ingested += await upsertPlacesFromGoogle(page.places);
+    token = page.nextPageToken;
+    if (!token) break;
+    if (pagesFetched < MAX_TEXT_SEARCH_PAGES && (await shouldStop())) break;
+  }
+
+  if (failed) {
+    if (pagesThisRequest > 0) {
+      session.record({ textNextPageToken: token, textPagesFetched: pagesFetched });
+    }
+    return { ingested, pagesFetched: pagesThisRequest, apiCalls, failed: true };
+  }
+
+  const chainDone = token === null || pagesFetched >= MAX_TEXT_SEARCH_PAGES;
+  session.record(
+    chainDone
+      ? {
+          textNextPageToken: null,
+          textPagesFetched: pagesFetched,
+          textRetryAfter: nextRetryAfter(chainHadPlaces ? 1 : 0),
+        }
+      : { textNextPageToken: token, textPagesFetched: pagesFetched, textRetryAfter: null },
+  );
+
+  return { ingested, pagesFetched: pagesThisRequest, apiCalls };
 }

@@ -215,6 +215,12 @@ export interface SwipeFeedResponse {
    * "limited themed spots" banner when this is low.
    */
   vibeSpotCount?: number;
+  /** Set when another request is fetching this area; the client waits until then */
+  busyUntil?: string | null;
+  /** No further Google results remain for this area */
+  exhausted?: boolean;
+  /** Google failed on this request; cards above may still be from the database */
+  searchFailed?: boolean;
 }
 
 export interface SwipeActionPayload {

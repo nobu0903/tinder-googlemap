@@ -22,9 +22,10 @@ export type AreaProfile = "tourist" | "urban" | "local";
  * Review bands scale with city density so "hidden gem" means the same
  * relative thing in Sapporo (local) and Tokyo (tourist).
  *
- * local:   vibe 60–300,  classic 301–800
- * urban:   vibe 60–600,  classic 601–1200
- * tourist: vibe 60–1000, classic 1001–2000
+ * local:   vibe up to 600, classic 601–5000
+ * urban:   vibe up to 800, classic 801–5000
+ * tourist: vibe up to 1000, classic 1001–5000
+ * 20–59 reviews pass only with rating ≥ 3.0. The 3 classic slots, not the cap, limit famous shops.
  */
 export const AREA_GEM_BANDS: Record<
   AreaProfile,
@@ -34,19 +35,19 @@ export const AREA_GEM_BANDS: Record<
   >
 > = {
   local: {
-    vibeMaxReviews: 300,
-    classicMinReviews: 301,
-    classicMaxReviews: 800,
-  },
-  urban: {
     vibeMaxReviews: 600,
     classicMinReviews: 601,
-    classicMaxReviews: 1_200,
+    classicMaxReviews: 5_000,
+  },
+  urban: {
+    vibeMaxReviews: 800,
+    classicMinReviews: 801,
+    classicMaxReviews: 5_000,
   },
   tourist: {
     vibeMaxReviews: 1_000,
     classicMinReviews: 1_001,
-    classicMaxReviews: 2_000,
+    classicMaxReviews: 5_000,
   },
 };
 
@@ -96,10 +97,10 @@ export function withoutAreaBandOverrides(
  * Dense cities raise vibeMax via applyAreaGemBands at request time.
  */
 export const DEFAULT_FEED_CONFIG: FeedAlgorithmConfig = {
-  classicMinReviews: 301,
-  classicMaxReviews: 800,
+  classicMinReviews: 601,
+  classicMaxReviews: 5_000,
   vibeMinReviews: 60,
-  vibeMaxReviews: 300,
+  vibeMaxReviews: 600,
   classicMegaReviewThreshold: 5_000,
   classicSlotsPerCycle: 3,
   vibeSlotsPerCycle: 7,

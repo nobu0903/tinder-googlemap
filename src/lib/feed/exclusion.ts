@@ -5,6 +5,7 @@ import {
 } from "@/lib/places/dining-filter";
 import type { SpotRow } from "@/types/backend";
 import type { FeedAlgorithmConfig } from "./config";
+import { passesReviewGate } from "./review-gate";
 
 export type FeedPoolKind = "classic" | "vibe" | "none";
 
@@ -25,20 +26,12 @@ export function getSpotExclusionReason(row: {
   return null;
 }
 
-export function passesReviewNoiseFloor(
-  row: Pick<SpotRow, "user_rating_count">,
-  minReviews: number,
-): boolean {
-  const count = row.user_rating_count;
-  return count !== null && count !== undefined && count >= minReviews;
-}
-
 export function classifyPool(
-  row: Pick<SpotRow, "user_rating_count">,
+  row: Pick<SpotRow, "user_rating_count" | "rating">,
   config: FeedAlgorithmConfig,
 ): FeedPoolKind {
   const count = row.user_rating_count;
-  if (!passesReviewNoiseFloor(row, config.vibeMinReviews)) return "none";
+  if (!passesReviewGate(row, config.vibeMinReviews)) return "none";
   if (count! > config.classicMaxReviews) return "none";
   if (
     count! >= config.classicMinReviews &&

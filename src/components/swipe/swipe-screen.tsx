@@ -84,6 +84,8 @@ export function SwipeScreen() {
     currentItem,
     isInitialLoading,
     isRefetching,
+    isWaiting,
+    askToWait,
     error,
     isSparseTheme,
     recordSwipe,
@@ -125,6 +127,24 @@ export function SwipeScreen() {
     !showAuthGate &&
     !showLimitGate &&
     (showLocating || (isInitialLoading && !currentItem));
+  const showAskToWait =
+    !showFullScreenLoading &&
+    !needsLocationPicker &&
+    !pickingLocation &&
+    !showAuthGate &&
+    !showLimitGate &&
+    askToWait &&
+    !currentItem;
+  const showRefetchingEmpty =
+    !showFullScreenLoading &&
+    !needsLocationPicker &&
+    !pickingLocation &&
+    !showAuthGate &&
+    !showLimitGate &&
+    !error &&
+    !showAskToWait &&
+    (isRefetching || isWaiting) &&
+    !currentItem;
   const showEmpty =
     !showFullScreenLoading &&
     !needsLocationPicker &&
@@ -132,6 +152,8 @@ export function SwipeScreen() {
     !showAuthGate &&
     !showLimitGate &&
     !error &&
+    !showAskToWait &&
+    !showRefetchingEmpty &&
     !currentItem;
   const showError =
     !showFullScreenLoading &&
@@ -155,7 +177,13 @@ export function SwipeScreen() {
 
   return (
     <MobileShell>
-      <main className="flex min-h-0 flex-1 flex-col px-4 pb-28 pt-6">
+      <main
+        className={`flex min-h-0 flex-col px-4 pb-28 pt-6 ${
+          needsLocationPicker || pickingLocation
+            ? "h-dvh overflow-hidden"
+            : "flex-1"
+        }`}
+      >
         <header className="relative mb-4 flex shrink-0 flex-col items-center">
           <WaitlistHeaderButton className="absolute right-0 top-0" />
           <h1 className="text-sm font-bold tracking-[0.18em] text-electric-chilli drop-shadow-[0_0_8px_rgba(224,62,0,0.25)]">
@@ -225,18 +253,14 @@ export function SwipeScreen() {
         {(needsLocationPicker || pickingLocation) &&
           !showAuthGate &&
           !showLimitGate && (
-            <LocationPicker onConfirm={handleLocationConfirm} />
+            <LocationPicker
+              initialCoords={coords}
+              onConfirm={handleLocationConfirm}
+              onCancel={
+                pickingLocation ? () => setPickingLocation(false) : undefined
+              }
+            />
           )}
-
-        {pickingLocation && !showAuthGate && !showLimitGate && (
-          <button
-            type="button"
-            onClick={() => setPickingLocation(false)}
-            className="mt-3 text-center text-[12px] text-text-muted underline underline-offset-2"
-          >
-            {t("swipe.cancel")}
-          </button>
-        )}
 
         {showFullScreenLoading && (
           <div className="flex flex-1 items-center justify-center">
@@ -261,6 +285,29 @@ export function SwipeScreen() {
             >
               {t("swipe.searchAnotherArea")}
             </button>
+          </div>
+        )}
+
+        {showAskToWait && (
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+            <p className="text-sm font-semibold text-text-primary">
+              {t("swipe.tryAgainLater")}
+            </p>
+            <button
+              type="button"
+              onClick={() => setPickingLocation(true)}
+              className="mt-2 flex h-11 w-full max-w-[240px] items-center justify-center rounded-xl bg-electric-chilli text-sm font-bold text-text-primary shadow-[0_4px_16px_rgba(224,62,0,0.35)] transition-transform active:scale-[0.98]"
+            >
+              {t("swipe.searchAnotherArea")}
+            </button>
+          </div>
+        )}
+
+        {showRefetchingEmpty && (
+          <div className="flex flex-1 items-center justify-center">
+            <p className="animate-pulse text-sm text-text-muted">
+              {t("swipe.loadingMore")}
+            </p>
           </div>
         )}
 

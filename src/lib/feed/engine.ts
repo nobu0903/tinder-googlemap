@@ -3,11 +3,14 @@
 import { supabaseAdmin } from "@/lib/supabase/server";
 import {
   ensureSpotsCached,
+  fetchTextSearchPagesIntoCache,
   hydrateFeedSpots,
+  isTextSearchExhausted,
   boundingBox,
   countAvailableSpots,
   countVibeSpotsInBox,
 } from "@/lib/places/ingest";
+import { AreaFetchSession, areaFetchKey, isRetryDue } from "@/lib/places/area-fetch-state";
 import type { IngestApiCalls, IngestProfile } from "@/lib/places/ingest";
 import { EMPTY_INGEST_API_CALLS } from "@/lib/places/ingest";
 import { filterDiningSpotRows } from "@/lib/places/dining-filter";
@@ -24,12 +27,13 @@ import {
   type AreaProfile,
   type FeedAlgorithmConfig,
 } from "./config";
+import { takeShuffledCycle } from "./cycle-order";
 import {
   classifyPool,
   getSpotExclusionReason,
-  passesReviewNoiseFloor,
   type FeedPoolKind,
 } from "./exclusion";
+import { passesReviewGate, reviewGateOrFilter } from "./review-gate";
 import { rankVibePool } from "./gem-score";
 import { matchesTheme, rankByThemeFit } from "@/lib/explore/theme-match";
 
@@ -86,6 +90,12 @@ export interface FeedEngineMeta {
     countGte2000: number;
     probedRadiusM: number;
   };
+  /** A Google search failed or timed out; the area was not marked as fetched */
+  searchFailed: boolean;
+  /** Another request holds this area's fetch lock until this time */
+  busyUntil: string | null;
+  /** No further Google pages remain for this area, and the deck is still thin */
+  fetchExhausted: boolean;
   cacheInRadius?: {
     total: number;
     fresh: number;
@@ -122,6 +132,7 @@ async function queryEligiblePools(
 ): Promise<{ classic: SpotRow[]; vibe: SpotRow[]; rawClassic: number; rawVibe: number }> {
   const noiseFloor = config.vibeMinReviews;
 
+  // 20–59 reviews pass only with rating >= 3.0 (review-gate); 60+ stay as before.
   const base = () =>
     supabaseAdmin
       .from("spots")
@@ -130,24 +141,26 @@ async function queryEligiblePools(
       .lte("lat", box.maxLat)
       .gte("lng", box.minLng)
       .lte("lng", box.maxLng)
-      .gte("user_rating_count", noiseFloor);
+      .or(reviewGateOrFilter(noiseFloor));
 
   // Fetch full vibe/classic bands first. Theme tags are applied in-memory with
   // soft price/rating fallbacks — strict vibe_tags-only filters starve rural caches.
-  const [{ data: classicRaw }, { data: vibeRaw }] = await Promise.all([
-    base()
-      .gte("user_rating_count", config.classicMinReviews)
-      .lte("user_rating_count", config.classicMaxReviews)
-      .limit(120),
-    base()
-      .gte("user_rating_count", config.vibeMinReviews)
-      .lte("user_rating_count", config.vibeMaxReviews)
-      .limit(120),
-  ]);
+  const [{ data: classicRaw, error: classicError }, { data: vibeRaw, error: vibeError }] =
+    await Promise.all([
+      base()
+        .gte("user_rating_count", config.classicMinReviews)
+        .lte("user_rating_count", config.classicMaxReviews)
+        .limit(120),
+      base()
+        .lte("user_rating_count", config.vibeMaxReviews)
+        .limit(120),
+    ]);
+  if (classicError) throw new Error(`Supabase classic pool failed: ${classicError.message}`);
+  if (vibeError) throw new Error(`Supabase vibe pool failed: ${vibeError.message}`);
 
   const applyPoolFilters = (rows: SpotRow[]) =>
     filterDiningSpotRows(rows).filter((row) =>
-      passesReviewNoiseFloor(row, noiseFloor),
+      passesReviewGate(row, noiseFloor),
     );
 
   let classic = applyPoolFilters((classicRaw ?? []) as SpotRow[]);
@@ -217,31 +230,23 @@ function buildFeedPoolWithDebug(
     merged.length < config.feedBatchSize &&
     (csi < classicSlotPool.length || vi < vibePool.length)
   ) {
-    for (
-      let i = 0;
-      i < config.classicSlotsPerCycle &&
-      csi < classicSlotPool.length &&
-      merged.length < config.feedBatchSize;
-      i++
-    ) {
-      const row = classicSlotPool[csi++];
+    const cycle = takeShuffledCycle({
+      classic: classicSlotPool,
+      classicIndex: csi,
+      vibe: vibePool,
+      vibeIndex: vi,
+      classicSlots: config.classicSlotsPerCycle,
+      vibeSlots: config.vibeSlotsPerCycle,
+      limit: config.feedBatchSize - merged.length,
+    });
+    if (cycle.items.length === 0) break;
+    csi = cycle.classicIndex;
+    vi = cycle.vibeIndex;
+    for (const { item: row, source } of cycle.items) {
       if (seen.has(row.id)) continue;
       seen.add(row.id);
       merged.push(row);
-      assignments.set(row.id, "classic");
-    }
-    for (
-      let i = 0;
-      i < config.vibeSlotsPerCycle &&
-      vi < vibePool.length &&
-      merged.length < config.feedBatchSize;
-      i++
-    ) {
-      const row = vibePool[vi++];
-      if (seen.has(row.id)) continue;
-      seen.add(row.id);
-      merged.push(row);
-      assignments.set(row.id, "vibe");
+      assignments.set(row.id, source);
     }
     if (csi >= classicSlotPool.length && vi >= vibePool.length) break;
   }
@@ -341,6 +346,11 @@ export interface RunFeedEngineOptions {
   forceIngest?: boolean;
   ingestProfile?: IngestProfile;
   config?: FeedAlgorithmConfig;
+  /**
+   * Spot ids sitting in the client's queue. Dropped from the response so they
+   * are not shown twice, but still counted toward the "20 eligible" checks.
+   */
+  pendingIds?: string[];
 }
 
 export interface RunFeedAnalyzeOptions {
@@ -507,6 +517,9 @@ export async function runFeedAnalyze(
         countGte2000: areaDensity.countGte2000,
         probedRadiusM: areaDensity.probedRadiusM,
       },
+      searchFailed: false,
+      busyUntil: null,
+      fetchExhausted: false,
       cacheInRadius: {
         total: totalInRadius,
         fresh: freshInRadius,
@@ -600,8 +613,17 @@ export async function runFeedEngine(
   const t0 = Date.now();
   const config = opts.config ?? getFeedConfig();
   const ingestProfile = opts.ingestProfile ?? "production";
-  const { lat, lng, tag, excludeIds = [], skipHydrate = false, forceIngest = false } = opts;
+  const {
+    lat,
+    lng,
+    tag,
+    excludeIds = [],
+    pendingIds = [],
+    skipHydrate = false,
+    forceIngest = false,
+  } = opts;
   const allExcluded = new Set(excludeIds);
+  const pending = new Set(pendingIds);
 
   // Scale gem bands to local density (local≈Sapporo, tourist≈Tokyo).
   // Probe all radius steps up front so Admin / cold cache still picks tourist.
@@ -628,6 +650,9 @@ export async function runFeedEngine(
   let ingestedCount = 0;
   let ingestMs = 0;
   let queryMs = 0;
+  let searchFailed = false;
+  let busyUntil: string | null = null;
+  let fetchExhausted = false;
   const totalApiCalls: IngestApiCalls = { ...EMPTY_INGEST_API_CALLS };
 
   const radiusSteps =
@@ -635,37 +660,47 @@ export async function runFeedEngine(
       ? config.radiusStepsM.filter((r) => r <= 5_000)
       : config.radiusStepsM;
 
+  // Production shares one area lock between Nearby and Text Search paging.
+  // 5km reads the database only — measured Text Search already reaches ~5–6km
+  // from the 2km rectangle, so a second Google call at 5km mostly repeats it.
+  const productionSession =
+    ingestProfile === "production"
+      ? new AreaFetchSession(areaFetchKey(lat, lng, radiusSteps[0] ?? 2_000))
+      : null;
+
+  try {
   for (let step = 0; step < radiusSteps.length; step++) {
     const radiusM = radiusSteps[step];
-    // Widen radius only when the previous step left the eligible pool thin.
-    // On expansion (step > 0), force a fresh Nearby for that larger circle —
-    // otherwise production only re-queries the same 2km-heavy cache and the
-    // 5km step is a no-op. (10km stays admin-only via radiusSteps filter.)
-    const shouldForce =
-      forceIngest ||
-      (step > 0 &&
-        eligibleAtRadius < effectiveConfig.minEligibleSpots);
+    const googleAtThisRadius = !(ingestProfile === "production" && step > 0);
 
     const ingestStart = Date.now();
-    const ingestResult = await ensureSpotsCached({
-      lat,
-      lng,
-      radiusMeters: radiusM,
-      excludedIds: excludeIds,
-      forceFetch: shouldForce,
-      ingestProfile,
-      // Expansion forceFetch already bypasses cooldown inside ensureSpotsCached.
-      bypassCooldown: forceIngest,
-      vibeMinReviews: effectiveConfig.vibeMinReviews,
-      vibeMaxReviews: effectiveConfig.vibeMaxReviews,
-    });
-    ingestedCount += ingestResult.ingested;
-    totalApiCalls.nearbySearch += ingestResult.apiCalls.nearbySearch;
-    totalApiCalls.textSearch += ingestResult.apiCalls.textSearch;
+    let ingestedThisStep = 0;
+    if (googleAtThisRadius) {
+      const ingestResult = await ensureSpotsCached({
+        lat,
+        lng,
+        radiusMeters: radiusM,
+        excludedIds: excludeIds,
+        forceFetch: forceIngest,
+        ingestProfile,
+        bypassCooldown: forceIngest,
+        vibeMinReviews: effectiveConfig.vibeMinReviews,
+        vibeMaxReviews: effectiveConfig.vibeMaxReviews,
+        session: productionSession ?? undefined,
+      });
+      ingestedThisStep = ingestResult.ingested;
+      ingestedCount += ingestResult.ingested;
+      totalApiCalls.nearbySearch += ingestResult.apiCalls.nearbySearch;
+      totalApiCalls.textSearch += ingestResult.apiCalls.textSearch;
+      if (ingestResult.failed) searchFailed = true;
+      if (ingestResult.skippedReason === "busy") {
+        busyUntil = productionSession?.busyUntil ?? busyUntil;
+      }
+    }
     ingestMs += Date.now() - ingestStart;
 
     // After ingest, density may jump (cold Tokyo → tourist). Re-band before query.
-    if (ingestResult.ingested > 0 || step === 0) {
+    if (ingestedThisStep > 0 || step === 0) {
       const boxForProfile = boundingBox(lat, lng, radiusM);
       const stepCounts = await countAreaDensity(boxForProfile);
       const stepProfile = profileFromDensity(
@@ -714,7 +749,77 @@ export async function runFeedEngine(
       usedRadiusM = radiusM;
     }
 
+    if (
+      productionSession &&
+      googleAtThisRadius &&
+      eligibleAtRadius < effectiveConfig.minEligibleSpots &&
+      !searchFailed &&
+      !busyUntil
+    ) {
+      const paging = await fetchTextSearchPagesIntoCache({
+        lat,
+        lng,
+        radiusMeters: radiusM,
+        session: productionSession,
+        shouldStop: async () => {
+          const pools = await queryEligiblePools(box, effectiveConfig, tag);
+          return (
+            countEligible(pools.classic, pools.vibe, allExcluded) >=
+            effectiveConfig.minEligibleSpots
+          );
+        },
+      });
+      ingestedCount += paging.ingested;
+      totalApiCalls.textSearch += paging.apiCalls.textSearch;
+      if (paging.failed) searchFailed = true;
+      if (paging.skippedReason === "busy") {
+        busyUntil = productionSession.busyUntil ?? busyUntil;
+      }
+
+      if (paging.pagesFetched > 0) {
+        const again = await queryEligiblePools(box, effectiveConfig, tag);
+        queryMs += 0;
+        poolStats = {
+          classicCandidates: again.rawClassic,
+          vibeCandidates: again.rawVibe,
+          classicAfterFilter: again.classic.length,
+          vibeAfterFilter: again.vibe.length,
+        };
+        eligibleAtRadius = countEligible(again.classic, again.vibe, allExcluded);
+        const paged = buildFeedPoolWithDebug(
+          again.classic,
+          again.vibe,
+          allExcluded,
+          effectiveConfig,
+          tag,
+        );
+        if (paged.rows.length > spots.length) {
+          spots = paged.rows;
+          assignments = paged.assignments;
+          usedRadiusM = radiusM;
+        }
+      }
+    }
+
     if (eligibleAtRadius >= effectiveConfig.minEligibleSpots) break;
+  }
+  } finally {
+    if (productionSession) {
+      productionSession.record({ eligibleCount: eligibleAtRadius });
+      const state = await productionSession.current().catch(() => null);
+      if (
+        state &&
+        eligibleAtRadius < effectiveConfig.minEligibleSpots &&
+        !searchFailed &&
+        !busyUntil &&
+        isTextSearchExhausted(state)
+      ) {
+        // Assigned after the loop via the flag below; captured here while the
+        // session still has this request's unsaved page state.
+        fetchExhausted = true;
+      }
+    }
+    await productionSession?.finish();
   }
 
   const hydrateStart = Date.now();
@@ -724,15 +829,17 @@ export async function runFeedEngine(
     : ingestProfile === "production"
       ? PRODUCTION_MAX_DETAILS_PER_FEED
       : ADMIN_MAX_DETAILS_PER_FEED;
-  const hydratedSpots = await hydrateFeedSpots(spots, hydrateApiCalls, {
+  const rowsForFeed = spots.filter((row) => !pending.has(row.id));
+  const hydratedSpots = await hydrateFeedSpots(rowsForFeed, hydrateApiCalls, {
     maxDetailsCalls,
   });
   totalApiCalls.placeDetails += hydrateApiCalls.placeDetails;
   const hydrateMs = skipHydrate ? 0 : Date.now() - hydrateStart;
 
-  const feedSpots = hydratedSpots.map((row) => rowToFeedSpot(row, lat, lng));
+  const visibleRows = hydratedSpots;
+  const feedSpots = visibleRows.map((row) => rowToFeedSpot(row, lat, lng));
 
-  const debugSpots: FeedSpotDebug[] = hydratedSpots.map((row) => {
+  const debugSpots: FeedSpotDebug[] = visibleRows.map((row) => {
     const slotSource = assignments.get(row.id) ?? "fill";
     return {
       spotId: row.id,
@@ -779,7 +886,7 @@ export async function runFeedEngine(
 
   return {
     spots: feedSpots,
-    rows: hydratedSpots,
+    rows: visibleRows,
     debugSpots,
     excludedSamples,
     meta: {
@@ -804,6 +911,9 @@ export async function runFeedEngine(
         countGte2000: areaDensity.countGte2000,
         probedRadiusM: areaDensity.probedRadiusM,
       },
+      searchFailed,
+      busyUntil,
+      fetchExhausted,
     },
   };
 }

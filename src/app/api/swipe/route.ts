@@ -13,11 +13,19 @@ const QuerySchema = z.object({
   lng: z.coerce.number().min(-180).max(180),
   tag: z.string().optional(),
   exclude: z.string().optional(),
+  /** Ids already in the client's queue. Not counted as swiped. */
+  pending: z.string().optional(),
 });
 
-function parseExcludeParam(raw: string | undefined): string[] {
+const MAX_CLIENT_IDS = 100;
+
+function parseIdList(raw: string | undefined): string[] {
   if (!raw) return [];
-  return raw.split(",").map((s) => s.trim()).filter(Boolean);
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, MAX_CLIENT_IDS);
 }
 
 // Max 15 feed requests per hour per IP (DB-backed; see consumeRateLimit).
@@ -48,6 +56,16 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(
         { error: "Missing GOOGLE_PLACES_API_KEY in .env.local" },
         { status: 500 },
+      );
+    }
+
+    if (message.includes("migration 008")) {
+      return NextResponse.json(
+        {
+          error:
+            "Database setup is missing the area fetch table. Run migration 008 in the Supabase SQL editor.",
+        },
+        { status: 503 },
       );
     }
 
@@ -91,7 +109,7 @@ async function handleSwipeFeed(req: NextRequest) {
     );
   }
 
-  const { lat, lng, tag, exclude: excludeParam } = parsed.data;
+  const { lat, lng, tag, exclude: excludeParam, pending: pendingParam } = parsed.data;
 
   let userId: string | null = null;
   const authHeader = req.headers.get("authorization");
@@ -117,7 +135,8 @@ async function handleSwipeFeed(req: NextRequest) {
     swipedIds.push(...(swipeRows ?? []).map((r) => r.spot_id));
   }
 
-  const clientExcluded = parseExcludeParam(excludeParam);
+  const clientExcluded = parseIdList(excludeParam);
+  const pendingIds = parseIdList(pendingParam);
   const allExcluded = [...swipedIds, ...clientExcluded];
 
   const result = await runFeedEngine({
@@ -125,11 +144,22 @@ async function handleSwipeFeed(req: NextRequest) {
     lng,
     tag,
     excludeIds: allExcluded,
+    pendingIds,
   });
+
+  if (result.meta.searchFailed && result.spots.length === 0) {
+    return NextResponse.json(
+      { error: "Feed request failed" },
+      { status: 503 },
+    );
+  }
 
   const response: SwipeFeedResponse = {
     spots: injectNativeAd(result.spots),
     radiusKm: result.meta.radiusKm,
+    busyUntil: result.meta.busyUntil,
+    exhausted: result.meta.fetchExhausted,
+    searchFailed: result.meta.searchFailed,
     ...(tag !== undefined
       ? { vibeSpotCount: result.meta.pools.vibeAfterFilter }
       : {}),

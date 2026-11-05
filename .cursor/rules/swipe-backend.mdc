@@ -8,7 +8,7 @@ globs: app/api/swipe/**/*.ts, lib/supabase/**/*.ts, lib/places/**/*.ts
 ## 1. Hybrid Data Hydration Pipeline (Cost & Latency Optimization)
 To avoid Google Places API billing bleed, the backend must prioritize the Supabase local cache over live API calls.
 
-1. **Nearby Batch Fetch:** Call `searchNearby` ONLY when the local database contains fewer than 20 un-swiped, fresh (updated within 7 days) spots within the target radius.
+1. **Nearby Batch Fetch:** Call `searchNearby` ONLY when the local database contains fewer than 20 spots within the target radius, and `area_fetch_state` says the wait has passed (30 days after a search that returned places, 7 days after an empty one). Do not use `spots.updated_at` for this — photo refreshes bump it. The 5km step reads the database only. When the 2km pool is still under 20, Text Search pages (max 3) fill it.
 2. **Conditional Place Details Enrichment:** 
    - If a fetched spot has fewer than 10 photos, call Place Details when cache is missing or expired to hydrate up to 10 photos.
    - Store the enriched payload into Supabase immediately. Never call Details for the same store twice within 7 days.
@@ -51,17 +51,9 @@ When calling Google `searchNearby`, exclude chain-heavy primary types **at reque
 - `sandwich_shop` blocks Subway-style chains.
 
 ### ② Hidden Gem SQL — Review Count Cap (70% Vibe Pool)
-Chain stores and mega-famous spots accumulate thousands of reviews. Local hidden gems typically sit in the **15–300 review** sweet spot with high ratings.
+Chain stores and mega-famous spots accumulate thousands of reviews. The vibe pool is reviews up to the area band (local 600 / urban 800 / tourist 1000). Classic runs from the next review up to 5000. The 3 classic slots per 10 cards are what keep famous shops from filling the deck. Those 3 seats are shuffled inside each 10, so a famous shop is not always the first card.
 
-**File:** `app/api/swipe/route.ts` → vibe pool Supabase query
-
-```sql
--- Equivalent filters applied via Supabase client:
-WHERE rating >= 4.0
-  AND user_rating_count BETWEEN 15 AND 300
-```
-
-Constants: `HIDDEN_GEM_MIN_RATING = 4.0`, `HIDDEN_GEM_MIN_REVIEWS = 15`, `HIDDEN_GEM_MAX_REVIEWS = 300`.
+A spot with 60+ reviews is eligible as before. A spot with 20–59 reviews is eligible only when its rating is at least 3.0. Under 20 is never saved or shown. Use the same rule when saving, when building the card pool, and when counting the 15 vibe spots (`passesReviewGate`).
 
 **Effect:** Surfaces high-quality independent restaurants that locals love but tourists haven't flooded yet.
 
@@ -83,7 +75,7 @@ if (PREMIUM_VIBE_TAGS.has(tag)) {
 | Layer | Where | What |
 |---|---|---|
 | Type exclusion | Google API ingest | `excludedPrimaryTypes` |
-| Review cap | Supabase vibe query | 15 ≤ reviews ≤ 300, rating ≥ 4.0 |
+| Review gate | save, card pool, vibe count | 60+ reviews, or 20–59 with rating ≥ 3.0 |
 | Price filter | Supabase vibe query (premium tags) | price_level 2–3 |
 
 Never weaken these filters to "fill" the feed — expand radius instead (`RADIUS_STEPS`).
