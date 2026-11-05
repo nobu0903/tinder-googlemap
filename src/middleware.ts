@@ -4,7 +4,8 @@ import { verifyAdminRequest } from "@/lib/admin/auth";
 /**
  * Hide /admin + /api/admin from the public internet in production.
  *
- * Development: pass-through (local auto-unlock via /api/admin/session still works).
+ * Development: pass-through so /admin can redirect to the unlock form.
+ * The session GET does not issue a cookie; POST with ADMIN_SECRET does.
  * Production:
  *   - POST/GET/DELETE /api/admin/session always allowed (login / status / logout)
  *   - everything else under /admin or /api/admin requires a valid admin cookie

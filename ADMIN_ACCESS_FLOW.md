@@ -51,20 +51,22 @@ flowchart TB
 
 ## ローカル開発（development）
 
-Middleware は **素通り**します。`.env.local` に `ADMIN_SECRET` があれば、開くだけで自動 Unlock されます。
+Middleware は素通りします。管理クッキーは、Unlock 画面で `ADMIN_SECRET` を入れたときだけ付きます。開いただけでは付きません。
 
 ```mermaid
 flowchart TD
   A[ブラウザで /admin を開く] --> B[Middleware: 開発なので通過]
   B --> C[Admin 画面が GET /api/admin/session]
-  C --> D{Cookie または env の秘密は？}
-  D -->|ADMIN_SECRET あり| E[サーバーが Cookie を自動付与]
-  E --> F[管理画面を表示]
-  D -->|すでに Cookie あり| F
-  D -->|秘密なし & ALLOW_INSECURE_ADMIN=1| F
+  C --> D{署名付き Cookie がある?}
+  D -->|ある| F[管理画面を表示]
+  D -->|ない| G[Unlock 画面へ]
+  G --> H[POST で ADMIN_SECRET を送る]
+  H --> F
 ```
 
-**あなたがやること:** `npm run dev` → `http://localhost:3000/admin`
+秘密を空にして `ALLOW_INSECURE_ADMIN=1` にした開発だけ、パスワードなしで開きます。
+
+**あなたがやること:** `npm run dev` → `http://localhost:3000/admin` → 表示された Unlock で `.env.local` の `ADMIN_SECRET` を入れる。
 
 ---
 
@@ -155,7 +157,7 @@ flowchart LR
 A. 本番は Unlock URL（`/ohyeswaitaminutemisterpostman`）だけが入口です。
 
 **Q. ローカルで Unlock URL は必要？**  
-A. 基本不要。`/admin` を開けば自動で入れます。
+A. `/admin` を開くと Unlock へ移ります。そこで `ADMIN_SECRET` を入れます。開いただけでは入れません。
 
 **Q. Save や Access の秘密入力は？**  
 A. 廃止済み。秘密は env のみ。本番の入力は Unlock 画面だけです。

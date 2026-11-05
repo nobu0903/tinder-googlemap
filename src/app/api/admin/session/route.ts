@@ -8,26 +8,20 @@ import {
 import { consumeRateLimit } from "@/lib/api/rate-limit";
 
 /**
- * GET /api/admin/session — check / establish admin session.
+ * GET /api/admin/session — check admin session.
  * Returns 200 always (avoids noisy 401 in the browser console while gated).
  *
- * Local: if ADMIN_SECRET is set in .env, auto-attaches HttpOnly cookie.
- * Production: no auto-unlock — use POST from /ohyeswaitaminutemisterpostman.
+ * A signed cookie is issued only by POST with ADMIN_SECRET.
+ * Development does not attach one on this GET: a dev server that is reachable
+ * from the network must not become admin without the password.
  */
 export async function GET(req: NextRequest) {
   if (await verifyAdminRequest(req)) {
     return NextResponse.json({ authenticated: true });
   }
 
-  const secret = process.env.ADMIN_SECRET?.trim();
-  if (secret && process.env.NODE_ENV === "development") {
-    const res = NextResponse.json({ authenticated: true, auto: true });
-    await attachAdminSessionCookie(res, secret);
-    return res;
-  }
-
   if (
-    !secret &&
+    !process.env.ADMIN_SECRET?.trim() &&
     process.env.ALLOW_INSECURE_ADMIN === "1" &&
     process.env.NODE_ENV === "development"
   ) {
