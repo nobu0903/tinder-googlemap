@@ -58,6 +58,13 @@ export interface SwipeStamp {
   createdAt: string;
 }
 
+/** A browser swiped on this Tokyo date. userId is set after that browser signs in. */
+export interface GuestSwipeDay {
+  guestId: string;
+  userId: string | null;
+  swipeDate: string;
+}
+
 export interface FeedbackStamp {
   createdAt: string;
 }
@@ -106,9 +113,20 @@ function inWindow(date: string, start: string, today: string): boolean {
   return date >= start && date <= today;
 }
 
+function accountKey(userId: string): string {
+  return `user:${userId}`;
+}
+
+function guestPersonKey(day: GuestSwipeDay): string | null {
+  if (day.userId) return accountKey(day.userId);
+  if (!day.guestId) return null;
+  return `guest:${day.guestId}`;
+}
+
 export function buildGrowthReport(input: {
   signups: SignupStamp[];
   swipes: SwipeStamp[];
+  guestDays?: GuestSwipeDay[];
   feedback: FeedbackStamp[];
   recentFeedback: FeedbackPreview[];
   now?: Date;
@@ -164,11 +182,11 @@ export function buildGrowthReport(input: {
     const liked = swipe.action === "like";
     swipes30 += 1;
     if (liked) likes30 += 1;
-    swipers30.add(swipe.userId);
+    swipers30.add(accountKey(swipe.userId));
     if (inWindow(date, start7, today)) {
       swipes7 += 1;
       if (liked) likes7 += 1;
-      swipers7.add(swipe.userId);
+      swipers7.add(accountKey(swipe.userId));
     }
     if (date === today) {
       swipesToday += 1;
@@ -179,8 +197,17 @@ export function buildGrowthReport(input: {
     if (bucket && people) {
       bucket.swipes += 1;
       if (liked) bucket.likes += 1;
-      people.add(swipe.userId);
+      people.add(accountKey(swipe.userId));
     }
+  }
+
+  for (const day of input.guestDays ?? []) {
+    if (!inWindow(day.swipeDate, start30, today)) continue;
+    const key = guestPersonKey(day);
+    if (!key) continue;
+    swipers30.add(key);
+    if (inWindow(day.swipeDate, start7, today)) swipers7.add(key);
+    swipersByDay.get(day.swipeDate)?.add(key);
   }
 
   for (const [date, people] of swipersByDay) {

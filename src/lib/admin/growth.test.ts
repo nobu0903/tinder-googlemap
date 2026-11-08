@@ -102,6 +102,57 @@ describe("buildGrowthReport", () => {
     expect(result.days.every((day) => day.signups === 0)).toBe(true);
   });
 
+  it("counts a guest browser as a person without adding a swipe", () => {
+    const result = buildGrowthReport({
+      now: NOW,
+      signups: [],
+      swipes: [],
+      guestDays: [{ guestId: "g-1", userId: null, swipeDate: "2026-11-06" }],
+      feedback: [],
+      recentFeedback: [],
+    });
+    expect(result.swipers).toEqual({ today: 1, days7: 1, days30: 1 });
+    expect(result.likes.today).toEqual({ likes: 0, swipes: 0, ratio: null });
+    expect(result.days[result.days.length - 1].swipers).toBe(1);
+  });
+
+  it("counts a signed-in browser and that account as one person", () => {
+    const result = buildGrowthReport({
+      now: NOW,
+      signups: [],
+      swipes: [{ userId: "a", action: "like", createdAt: "2026-11-05 16:00:00" }],
+      guestDays: [{ guestId: "g-1", userId: "a", swipeDate: "2026-11-06" }],
+      feedback: [],
+      recentFeedback: [],
+    });
+    expect(result.swipers.today).toBe(1);
+    expect(result.likes.today.swipes).toBe(1);
+  });
+
+  it("keeps an unsigned browser separate from a logged-in person", () => {
+    const result = buildGrowthReport({
+      now: NOW,
+      signups: [],
+      swipes: [{ userId: "a", action: "like", createdAt: "2026-11-05 16:00:00" }],
+      guestDays: [{ guestId: "g-1", userId: null, swipeDate: "2026-11-06" }],
+      feedback: [],
+      recentFeedback: [],
+    });
+    expect(result.swipers.today).toBe(2);
+  });
+
+  it("ignores a guest mark older than 30 days", () => {
+    const result = buildGrowthReport({
+      now: NOW,
+      signups: [],
+      swipes: [],
+      guestDays: [{ guestId: "g-old", userId: null, swipeDate: "2026-10-01" }],
+      feedback: [],
+      recentFeedback: [],
+    });
+    expect(result.swipers.days30).toBe(0);
+  });
+
   it("counts feedback inside the windows and keeps the recent text", () => {
     const result = report();
     expect(result.feedback.today).toBe(1);

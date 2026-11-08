@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { GuestSwipeLink } from "@/components/auth/guest-swipe-link";
 import { LanguageProvider } from "@/lib/i18n/context";
 import "./globals.css";
 
@@ -62,7 +63,10 @@ export default function RootLayout({
         />
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} font-sans`}>
-        <LanguageProvider>{children}</LanguageProvider>
+        <LanguageProvider>
+          <GuestSwipeLink />
+          {children}
+        </LanguageProvider>
       </body>
     </html>
   );

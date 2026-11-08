@@ -1,11 +1,15 @@
 // Server-only. The service-role client must not be imported from a client component.
 import { supabaseAdmin } from "@/lib/supabase/server";
 import {
+  addDateDays,
   buildGrowthReport,
   FEEDBACK_PREVIEW_LIMIT,
+  GROWTH_WINDOW_DAYS,
+  tokyoDateKey,
   type FeedbackPreview,
   type GrowthReport,
   type SignupStamp,
+  type GuestSwipeDay,
   type SwipeStamp,
 } from "@/lib/admin/growth";
 
@@ -83,6 +87,48 @@ async function loadSwipes(since: string): Promise<{ rows: SwipeStamp[]; truncate
   return { rows, truncated };
 }
 
+function missingGuestTable(error: { code?: string; message?: string }): boolean {
+  return (
+    error.code === "42P01" ||
+    error.code === "PGRST205" ||
+    (error.message ?? "").includes("guest_swipe_days")
+  );
+}
+
+async function loadGuestDays(
+  sinceDate: string,
+): Promise<{ rows: GuestSwipeDay[]; truncated: boolean }> {
+  const rows: GuestSwipeDay[] = [];
+  let truncated = false;
+
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const from = page * PAGE_SIZE;
+    const { data, error } = await supabaseAdmin
+      .from("guest_swipe_days")
+      .select("guest_id, user_id, swipe_date")
+      .gte("swipe_date", sinceDate)
+      .order("swipe_date", { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) {
+      if (missingGuestTable(error)) return { rows: [], truncated: false };
+      throw new Error("Could not load guest swipe marks");
+    }
+    const batch = data ?? [];
+    for (const row of batch) {
+      if (!row.guest_id || !row.swipe_date) continue;
+      rows.push({
+        guestId: row.guest_id,
+        userId: row.user_id,
+        swipeDate: String(row.swipe_date).slice(0, 10),
+      });
+    }
+    if (batch.length < PAGE_SIZE) return { rows, truncated };
+    if (page === MAX_PAGES - 1) truncated = true;
+  }
+
+  return { rows, truncated };
+}
+
 async function loadFeedbackTimes(sinceIso: string): Promise<string[]> {
   const times: string[] = [];
 
@@ -146,9 +192,11 @@ export async function loadGrowthReport(
 async function readGrowthReport(now: Date): Promise<GrowthReport> {
   const sinceNaive = sinceUtcNaive(now);
   const sinceIso = new Date(now.getTime() - 40 * 24 * 60 * 60 * 1000).toISOString();
-  const [signups, swipes, feedbackTimes, recentFeedback] = await Promise.all([
+  const sinceDate = addDateDays(tokyoDateKey(now), -(GROWTH_WINDOW_DAYS - 1));
+  const [signups, swipes, guestDays, feedbackTimes, recentFeedback] = await Promise.all([
     loadSignups(),
     loadSwipes(sinceNaive),
+    loadGuestDays(sinceDate),
     loadFeedbackTimes(sinceIso),
     loadRecentFeedback(),
   ]);
@@ -157,8 +205,9 @@ async function readGrowthReport(now: Date): Promise<GrowthReport> {
     now,
     signups: signups.rows,
     swipes: swipes.rows,
+    guestDays: guestDays.rows,
     feedback: feedbackTimes.map((createdAt) => ({ createdAt })),
     recentFeedback,
-    truncated: signups.truncated || swipes.truncated,
+    truncated: signups.truncated || swipes.truncated || guestDays.truncated,
   });
 }

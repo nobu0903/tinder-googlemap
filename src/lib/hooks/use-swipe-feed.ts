@@ -15,6 +15,7 @@ import {
   swipeFetchKey,
 } from "@/lib/feed/swipe-fetch-lock";
 import { openCurrentNativeAd } from "@/lib/ads/native-ad-opener";
+import { noteGuestSwipeInBrowser } from "@/lib/swipe/guest-client";
 
 /** Refetch once the queue is down to this many cards, without the 2-minute gap */
 const REFETCH_AT_REMAINING = 3;
@@ -453,6 +454,7 @@ export function useSwipeFeed({
       }
 
       seenSpotIdsRef.current.add(item.spotId);
+      if (!accessTokenRef.current) noteGuestSwipeInBrowser();
 
       if (accessTokenRef.current) {
         fetch("/api/swipe/action", {
