@@ -69,6 +69,8 @@ export const translations = {
       more: "その他",
       sendFeedback: "フィードバックを送る",
       howTo: "使い方",
+      privacy: "プライバシーポリシー",
+      terms: "利用規約",
       language: "言語",
     },
     collection: {
@@ -259,6 +261,7 @@ export const translations = {
         "⚡ Limited themed spots nearby — showing top-rated alternatives too",
       nearYou: "Near you",
       change: "Change",
+      readAbout: "How this works",
       signInToSave: "Sign in to save your likes →",
       theme: "Theme",
     },
@@ -295,6 +298,8 @@ export const translations = {
       more: "More",
       sendFeedback: "Send feedback",
       howTo: "How to use",
+      privacy: "Privacy policy",
+      terms: "Terms of use",
       language: "Language",
     },
     collection: {

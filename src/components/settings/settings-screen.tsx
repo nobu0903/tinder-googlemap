@@ -31,7 +31,6 @@ export function SettingsScreen() {
   return (
     <MobileShell>
       <header className="relative shrink-0 border-b border-white/8 px-5 pb-3 pt-5">
-        <WaitlistHeaderButton className="absolute right-5 top-5" />
         <p className="text-[11px] font-bold tracking-[0.18em] text-electric-chilli">
           VIBELOOP
         </p>
@@ -88,6 +87,7 @@ export function SettingsScreen() {
         </SettingsSection>
 
         <SettingsSection label={t("settings.more")}>
+          <SettingsRowLink
             label={t("settings.howTo")}
             icon={<BookOpen className="size-4 text-text-muted" />}
             href="/lp"
@@ -114,7 +114,6 @@ export function SettingsScreen() {
 
         <p className="mt-6 px-5 text-center text-[10px] text-neutral-700">
           VibeLoop v{APP_VERSION}
-            bordered
         </p>
       </main>
 

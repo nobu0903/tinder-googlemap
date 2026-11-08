@@ -187,17 +187,6 @@ export function SwipeScreen() {
           <h1 className="text-sm font-bold tracking-[0.18em] text-electric-chilli drop-shadow-[0_0_8px_rgba(224,62,0,0.25)]">
             🔥 {t("nav.swipe")}
           </h1>
-          <nav className="mt-2 flex flex-wrap justify-center gap-x-3 text-[10px] text-text-muted">
-            <Link href="/lp" className="underline underline-offset-2 hover:text-text-primary">
-              {t("swipe.howTo")}
-            </Link>
-            <Link href="/privacy" className="underline underline-offset-2 hover:text-text-primary">
-              {t("swipe.privacy")}
-            </Link>
-            <Link href="/terms" className="underline underline-offset-2 hover:text-text-primary">
-              {t("swipe.terms")}
-            </Link>
-          </nav>
           {themeName && (
             <p className="mt-1.5 text-[11px] font-medium text-text-muted">
               {t("swipe.theme")}:{" "}
@@ -380,15 +369,6 @@ export function SwipeScreen() {
                 }}
               />
             </div>
-
-            {!authLoading && !session && !isThemedSwipe && (
-              <Link
-                href="/login?redirect=/"
-                className="mt-3 flex items-center justify-center gap-1.5 text-[11px] text-stealth transition-colors hover:text-text-muted"
-              >
-                <span>{t("swipe.signInToSave")}</span>
-              </Link>
-            )}
           </section>
         )}
       </main>
