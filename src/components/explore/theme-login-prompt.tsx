@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
-import Link from "next/link";
 import { Lock, X } from "lucide-react";
-import { buildLoginPath } from "@/lib/auth/safe-redirect";
+import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
 import { useLang } from "@/lib/i18n/context";
 
 interface ThemeLoginPromptProps {
@@ -18,7 +17,6 @@ export function ThemeLoginPrompt({
   destination,
   onClose,
 }: ThemeLoginPromptProps) {
-  const loginHref = buildLoginPath(destination);
   const { t } = useLang();
 
   useEffect(() => {
@@ -72,12 +70,11 @@ export function ThemeLoginPrompt({
           {t("themePrompt.themeNeedsAccount").replace("{theme}", "")}
         </p>
 
-        <Link
-          href={loginHref}
-          className="mt-7 flex h-12 w-full items-center justify-center rounded-xl bg-electric-chilli text-sm font-bold text-text-primary shadow-[0_4px_20px_rgba(224,62,0,0.35)] transition-transform active:scale-[0.98]"
-        >
-          {t("themePrompt.signInCreate")}
-        </Link>
+        <GoogleSignInButton
+          next={destination}
+          label={t("themePrompt.signInCreate")}
+          className="mt-7"
+        />
 
         <button
           type="button"

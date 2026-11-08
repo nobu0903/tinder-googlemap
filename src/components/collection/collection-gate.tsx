@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { Heart, Lock } from "lucide-react";
+import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
 import { useLang } from "@/lib/i18n/context";
 
 export function CollectionGate() {
@@ -27,12 +27,11 @@ export function CollectionGate() {
         {t("collectionGate.desc")}
       </p>
 
-      <Link
-        href="/login?redirect=/collection"
-        className="mt-8 flex h-12 w-full max-w-[240px] items-center justify-center rounded-xl bg-electric-chilli text-sm font-bold text-text-primary shadow-[0_4px_20px_rgba(224,62,0,0.35)] transition-all active:scale-[0.98] hover:shadow-[0_6px_28px_rgba(224,62,0,0.5)]"
-      >
-        {t("collectionGate.signInOrCreate")}
-      </Link>
+      <GoogleSignInButton
+        next="/collection"
+        label={t("collectionGate.signInOrCreate")}
+        className="mt-8 max-w-[280px]"
+      />
 
       <p className="mt-4 text-xs text-stealth">{t("collectionGate.freeAndFast")}</p>
     </div>

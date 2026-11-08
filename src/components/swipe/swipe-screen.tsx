@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
+import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
 import { MobileShell } from "@/components/layout/mobile-shell";
 import { BottomNav } from "@/components/layout/bottom-nav";
 import { SwipeCard } from "@/components/swipe/swipe-card";
@@ -14,7 +15,6 @@ import { useSwipeFeed } from "@/lib/hooks/use-swipe-feed";
 import { useAuth } from "@/lib/hooks/use-auth";
 import { useLocation } from "@/lib/hooks/use-location";
 import { useFreeSwipeQuota } from "@/lib/hooks/use-free-swipe-quota";
-import { buildLoginPath } from "@/lib/auth/safe-redirect";
 import { EXPLORE_THEMES } from "@/lib/explore-mock";
 import { useLang } from "@/lib/i18n/context";
 import { translations } from "@/lib/i18n/translations";
@@ -25,7 +25,6 @@ import {
 } from "@/types/backend";
 
 export function SwipeScreen() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const tag = searchParams.get("tag") ?? undefined;
   const themeId = searchParams.get("theme") ?? undefined;
@@ -34,7 +33,7 @@ export function SwipeScreen() {
   const labelParam = searchParams.get("label");
   const isThemedSwipe = Boolean(tag);
 
-  const { accessToken, isLoading: authLoading, session } = useAuth();
+  const { accessToken, isLoading: authLoading, session, signInWithGoogle } = useAuth();
   const { coords, status, setManualCoords } = useLocation();
   const { used, limit, isLimitReached, consume } = useFreeSwipeQuota();
   const { t, lang } = useLang();
@@ -44,6 +43,8 @@ export function SwipeScreen() {
   const [moreInfoOpen, setMoreInfoOpen] = useState(false);
   const [pickingLocation, setPickingLocation] = useState(false);
   const swipeTriggerRef = useRef<((action: SwipeAction) => void) | null>(null);
+  const googleRedirectStarted = useRef(false);
+  const [googleRedirectHeld, setGoogleRedirectHeld] = useState(false);
 
   const themeName = useMemo(() => {
     if (!themeId) return null;
@@ -65,12 +66,32 @@ export function SwipeScreen() {
   }, [latParam, lngParam, setManualCoords]);
 
   useEffect(() => {
-    if (!isThemedSwipe || authLoading) return;
-    if (!session) {
-      const redirect = `/?${searchParams.toString()}`;
-      router.replace(buildLoginPath(redirect));
+    if (session) sessionStorage.removeItem("vl-google-redirect-at");
+  }, [session]);
+
+  useEffect(() => {
+    if (!isThemedSwipe || authLoading || session || googleRedirectStarted.current) return;
+    const redirect = `/?${searchParams.toString()}`;
+    let last = 0;
+    try {
+      last = Number(sessionStorage.getItem("vl-google-redirect-at") ?? 0);
+    } catch {
+      last = 0;
     }
-  }, [isThemedSwipe, authLoading, session, router, searchParams]);
+    if (Number.isFinite(last) && Date.now() - last < 60_000) {
+      setGoogleRedirectHeld(true);
+      return;
+    }
+    googleRedirectStarted.current = true;
+    try {
+      sessionStorage.setItem("vl-google-redirect-at", String(Date.now()));
+    } catch {
+      // Private mode can block storage. Still start Google once this mount.
+    }
+    void signInWithGoogle(redirect).then(({ error }) => {
+      if (error) setGoogleRedirectHeld(true);
+    });
+  }, [isThemedSwipe, authLoading, session, searchParams, signInWithGoogle]);
 
   const feedEnabled =
     Boolean(coords) &&
@@ -221,10 +242,17 @@ export function SwipeScreen() {
         </header>
 
         {showAuthGate && (
-          <div className="flex flex-1 items-center justify-center">
-            <p className="animate-pulse text-sm text-text-muted">
-              {t("swipe.checkingSignIn")}
-            </p>
+          <div className="flex flex-1 items-center justify-center px-6">
+            {googleRedirectHeld ? (
+              <GoogleSignInButton
+                next={`/?${searchParams.toString()}`}
+                className="max-w-[280px]"
+              />
+            ) : (
+              <p className="animate-pulse text-sm text-text-muted">
+                {t("swipe.checkingSignIn")}
+              </p>
+            )}
           </div>
         )}
 

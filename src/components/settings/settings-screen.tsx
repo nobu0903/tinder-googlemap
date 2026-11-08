@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { BookOpen, Globe, LogOut, MessageSquare, Scale, Shield } from "lucide-react";
+import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
 import { MobileShell } from "@/components/layout/mobile-shell";
 import { BottomNav } from "@/components/layout/bottom-nav";
 import {
@@ -63,12 +64,10 @@ export function SettingsScreen() {
               <p className="mb-3 text-sm text-text-muted">
                 {t("settings.signInPrompt")}
               </p>
-              <Link
-                href="/login"
-                className="flex h-11 w-full items-center justify-center rounded-xl bg-electric-chilli text-sm font-bold text-text-primary shadow-[0_4px_16px_rgba(224,62,0,0.3)] transition-transform active:scale-[0.98]"
-              >
-                {t("settings.signInCreate")}
-              </Link>
+              <GoogleSignInButton
+                next="/settings"
+                label={t("settings.signInCreate")}
+              />
             </div>
           )}
         </SettingsSection>
