@@ -2,6 +2,7 @@ import { describe, expect, it, afterEach, vi } from "vitest";
 import {
   ADMIN_COOKIE_NAME,
   createAdminSessionToken,
+  unlockEntryAllowed,
   verifyAdminRequest,
 } from "@/lib/admin/auth";
 
@@ -64,17 +65,21 @@ describe("verifyAdminRequest (BUG-014)", () => {
     );
   });
 
-  it("refuses every admin request on a production server", async () => {
-    vi.stubEnv("ADMIN_SECRET", "s3cret");
+  it("hides the unlock form in production unless the bookmark key matches", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("ALLOW_INSECURE_ADMIN", "1");
-    const token = await createAdminSessionToken("s3cret");
-    expect(await verifyAdminRequest(makeReq({ secretHeader: "s3cret" }))).toBe(
-      false,
-    );
-    expect(await verifyAdminRequest(makeReq({ cookieSecret: token }))).toBe(
-      false,
-    );
+    vi.stubEnv("ADMIN_UNLOCK_KEY", "");
+    expect(await unlockEntryAllowed(undefined)).toBe(false);
+
+    vi.stubEnv("ADMIN_UNLOCK_KEY", "bookmark-key");
+    expect(await unlockEntryAllowed(undefined)).toBe(false);
+    expect(await unlockEntryAllowed("nope")).toBe(false);
+    expect(await unlockEntryAllowed("bookmark-key")).toBe(true);
+  });
+
+  it("shows the unlock form in development when no bookmark key is configured", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("ADMIN_UNLOCK_KEY", "");
+    expect(await unlockEntryAllowed(undefined)).toBe(true);
   });
 
   it("rejects an expired or tampered session cookie", async () => {

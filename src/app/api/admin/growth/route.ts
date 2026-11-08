@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { consumeRateLimit } from "@/lib/api/rate-limit";
-import { adminUnauthorized, verifyAdminRequest } from "@/lib/admin/auth";
+import { authorizeAdminRequest } from "@/lib/admin/gate";
 import {
   GrowthRefreshLimitedError,
   loadGrowthReport,
 } from "@/lib/admin/growth-load";
 
 export async function GET(req: NextRequest) {
-  if (!(await verifyAdminRequest(req))) return adminUnauthorized();
+  const denied = await authorizeAdminRequest(req);
+  if (denied) return denied;
 
   try {
     const report = await loadGrowthReport(new Date(), async () => {

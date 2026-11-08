@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { adminUnauthorized, verifyAdminRequest } from "@/lib/admin/auth";
+import { authorizeAdminRequest } from "@/lib/admin/gate";
 import { resolveSnsCardFromMapsUrl } from "@/lib/places/sns-card";
 
 const BodySchema = z.object({
@@ -12,7 +12,8 @@ const BodySchema = z.object({
  * for screenshot-ready swipe cards on the admin page.
  */
 export async function POST(req: NextRequest) {
-  if (!(await verifyAdminRequest(req))) return adminUnauthorized();
+  const denied = await authorizeAdminRequest(req);
+  if (denied) return denied;
 
   let body: unknown;
   try {

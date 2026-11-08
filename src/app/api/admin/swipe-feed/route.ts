@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { adminUnauthorized, verifyAdminRequest } from "@/lib/admin/auth";
+import { authorizeAdminRequest } from "@/lib/admin/gate";
 import { getFeedConfig, withoutAreaBandOverrides } from "@/lib/feed/config";
 import { runFeedEngine } from "@/lib/feed/engine";
 
@@ -27,7 +27,8 @@ const PostBodySchema = z.object({
 
 /** POST — admin swipe feed (production profile, cache-first) */
 export async function POST(req: NextRequest) {
-  if (!(await verifyAdminRequest(req))) return adminUnauthorized();
+  const denied = await authorizeAdminRequest(req);
+  if (denied) return denied;
 
   let body: unknown;
   try {

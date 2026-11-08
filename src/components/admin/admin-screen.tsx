@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/lib/hooks/use-auth";
+import { registerAdminPasskey } from "@/lib/admin/passkey-browser";
 import {
   AREA_GEM_BANDS,
   type AreaProfile,
@@ -69,10 +71,13 @@ function areaProfileBadge(profile: AreaProfile) {
 }
 
 export function AdminScreen() {
+  const productionAdmin = process.env.NODE_ENV === "production";
   const router = useRouter();
-  const [authState, setAuthState] = useState<"checking" | "needed" | "ok">(
-    "checking",
-  );
+  const { accessToken, isLoading: googleLoading, signInWithGoogle } = useAuth();
+  const [authState, setAuthState] = useState<
+    "checking" | "needed" | "ok" | "google" | "register" | "denied"
+  >("checking");
+  const [registering, setRegistering] = useState(false);
   const [coordinates, setCoordinates] = useState(
     formatGoogleMapsCoordinates(35.658034, 139.701636),
   );
@@ -116,6 +121,7 @@ export function AdminScreen() {
   }, [loadConfig, loadCache]);
 
   useEffect(() => {
+    if (productionAdmin) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -134,16 +140,54 @@ export function AdminScreen() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [productionAdmin]);
 
   useEffect(() => {
     if (authState === "ok") void init();
   }, [authState, init]);
 
   useEffect(() => {
+    if (productionAdmin) return;
     if (authState !== "needed") return;
     router.replace(ADMIN_UNLOCK_PATH);
-  }, [authState, router]);
+  }, [authState, productionAdmin, router]);
+
+  useEffect(() => {
+    if (!productionAdmin) return;
+    if (googleLoading) return;
+    if (!accessToken) {
+      setAuthState("google");
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/admin/passkey/status", {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          registered?: boolean;
+          error?: string;
+        };
+        if (cancelled) return;
+        if (res.status === 503) {
+          setError(data.error ?? "Passkey storage is not ready");
+          setAuthState("register");
+          return;
+        }
+        if (!res.ok) {
+          setAuthState("denied");
+          return;
+        }
+        setAuthState(data.registered ? "ok" : "register");
+      } catch {
+        if (!cancelled) setAuthState("denied");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, googleLoading, productionAdmin]);
 
   const resolveCoordinates = (): { lat: number; lng: number } => {
     const parsed = parseGoogleMapsCoordinates(coordinates);
@@ -288,12 +332,32 @@ export function AdminScreen() {
             </h1>
             <p className="mt-0.5 text-xs text-neutral-600">設定検証 &amp; スワイププレビュー</p>
           </div>
-          <Link
-            href="/"
-            className="text-xs text-neutral-500 hover:text-neutral-300"
-          >
-            ← Back to app
-          </Link>
+          <div className="flex items-center gap-4">
+            {productionAdmin && authState === "ok" && (
+              <button
+                type="button"
+                disabled={registering}
+                onClick={() => {
+                  setRegistering(true);
+                  setError(null);
+                  void registerAdminPasskey()
+                    .catch((err: unknown) => {
+                      setError(err instanceof Error ? err.message : "パスキーを追加できませんでした");
+                    })
+                    .finally(() => setRegistering(false));
+                }}
+                className="text-xs text-neutral-500 hover:text-neutral-300 disabled:opacity-50"
+              >
+                パスキーを追加
+              </button>
+            )}
+            <Link
+              href="/"
+              className="text-xs text-neutral-500 hover:text-neutral-300"
+            >
+              ← Back to app
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -302,10 +366,48 @@ export function AdminScreen() {
           <p className="animate-pulse text-sm text-neutral-500">Checking access…</p>
         )}
 
+        {authState === "google" && (
+          <button
+            type="button"
+            onClick={() => void signInWithGoogle("/admin")}
+            className="rounded border border-neutral-600 px-3 py-1.5 text-sm hover:bg-neutral-800"
+          >
+            Googleでログイン
+          </button>
+        )}
+
+        {authState === "register" && (
+          <div className="space-y-3">
+            <p className="text-sm text-neutral-400">
+              このサイト用のパスキーを作ります。Googleへログインするパスキーとは別です。
+            </p>
+            {error && <p className="text-sm text-red-300">{error}</p>}
+            <button
+              type="button"
+              disabled={registering}
+              onClick={() => {
+                setRegistering(true);
+                setError(null);
+                void registerAdminPasskey()
+                  .then(() => setAuthState("ok"))
+                  .catch((err: unknown) => {
+                    setError(err instanceof Error ? err.message : "パスキーを作れませんでした");
+                  })
+                  .finally(() => setRegistering(false));
+              }}
+              className="rounded border border-neutral-600 px-3 py-1.5 text-sm hover:bg-neutral-800 disabled:opacity-50"
+            >
+              パスキーを作る
+            </button>
+          </div>
+        )}
+
+        {authState === "denied" && (
+          <p className="text-sm text-neutral-500">このアカウントでは管理画面を開けません。</p>
+        )}
+
         {authState === "needed" && (
-          <p className="text-sm text-neutral-500">
-            Redirecting to unlock…
-          </p>
+          <p className="text-sm text-neutral-500">Redirecting to unlock…</p>
         )}
 
         {authState === "ok" && (
@@ -316,42 +418,6 @@ export function AdminScreen() {
           </div>
         )}
         <AdminGrowthPanel />
-        {/* Settings info */}
-        <section className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-4 text-xs text-neutral-400">
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-neutral-500">
-            どの設定が効いているか
-          </h2>
-          <ul className="list-inside list-disc space-y-1 leading-relaxed">
-            <li>
-              <strong className="text-neutral-300">エリア帯</strong>
-              ：DB 分析・スワイプともキャッシュ密度で local / urban / tourist
-              を自動判定し、レビュー帯を切り替える
-            </li>
-            <li>
-              <strong className="text-neutral-300">メイン</strong>
-              ：「この設定でスワイプ」＝本番同等（キャッシュ優先・軽量 API）
-            </li>
-            <li>
-              <strong className="text-neutral-300">DB 分析</strong>
-              ：Google API 0回。自動帯＋キャッシュ済みデータのミックス確認
-            </li>
-            <li>
-              <strong className="text-neutral-300">データ投入</strong>
-              ：新エリアのみ（高度な操作）。軽量≈1 API / 深掘り≈8–13 API
-            </li>
-            <li>
-              <strong className="text-neutral-300">本番スワイプ (/api/swipe)</strong>
-              ：「アルゴリズム設定を本番に反映」のスロット比など ＋ リクエスト時の自動帯
-            </li>
-          </ul>
-          {config && (
-            <p className="mt-3 font-mono text-[10px] text-neutral-600">
-              本番に保存済み: vibeMin {config.vibeMinReviews} · 比率{" "}
-              {config.classicSlotsPerCycle}:{config.vibeSlotsPerCycle} ·
-              （Classic/Vibe 上限はエリア自動）
-            </p>
-          )}
-        </section>
 
         {status && (
           <div className="rounded border border-emerald-900/40 bg-emerald-950/30 px-4 py-2 text-xs text-emerald-400">

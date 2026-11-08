@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { adminUnauthorized, verifyAdminRequest } from "@/lib/admin/auth";
+import { authorizeAdminRequest } from "@/lib/admin/gate";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import {
   CACHE_TTL_DAYS,
@@ -10,7 +10,8 @@ import {
 } from "@/lib/places/ingest";
 
 export async function GET(req: NextRequest) {
-  if (!(await verifyAdminRequest(req))) return adminUnauthorized();
+  const denied = await authorizeAdminRequest(req);
+  if (denied) return denied;
 
   const { count, error } = await supabaseAdmin
     .from("spots")
@@ -49,7 +50,8 @@ const IngestSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  if (!(await verifyAdminRequest(req))) return adminUnauthorized();
+  const denied = await authorizeAdminRequest(req);
+  if (denied) return denied;
 
   let body: unknown;
   try {
@@ -117,7 +119,8 @@ const HARD_DELETE_CONFIRM = "DELETE_ALL_SPOTS_AND_SWIPES";
  * Hard delete only with `{ "mode": "hard", "confirm": "DELETE_ALL_SPOTS_AND_SWIPES" }`.
  */
 export async function DELETE(req: NextRequest) {
-  if (!(await verifyAdminRequest(req))) return adminUnauthorized();
+  const denied = await authorizeAdminRequest(req);
+  if (denied) return denied;
 
   let raw: unknown = {};
   try {

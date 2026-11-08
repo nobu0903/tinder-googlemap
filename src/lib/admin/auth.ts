@@ -4,19 +4,25 @@ import { ADMIN_COOKIE_NAME } from "@/lib/admin/constants";
 export { ADMIN_COOKIE_NAME, ADMIN_UNLOCK_PATH } from "@/lib/admin/constants";
 
 /** Signed session lifetime. The cookie is not the ADMIN_SECRET. */
-const SESSION_TTL_SEC = 60 * 60 * 24 * 30;
+const SESSION_TTL_SEC = 60 * 60 * 24 * 7;
 const SESSION_VERSION = "v1";
-
-/**
- * Admin pages and APIs exist only on the local dev server.
- * A public production deploy always answers 404, even with the right secret.
- */
-export function isLocalAdminEnabled(): boolean {
-  return process.env.NODE_ENV !== "production";
-}
 
 export function adminNotFound(): NextResponse {
   return NextResponse.json({ error: "Not Found" }, { status: 404 });
+}
+
+/**
+ * Production hides the unlock form unless the bookmark includes
+ * `?k=` matching ADMIN_UNLOCK_KEY. The key is not the password.
+ * Development without that env still shows the form.
+ */
+export async function unlockEntryAllowed(
+  presented: string | undefined,
+): Promise<boolean> {
+  const key = process.env.ADMIN_UNLOCK_KEY?.trim();
+  if (!key) return process.env.NODE_ENV !== "production";
+  if (!presented) return false;
+  return adminSecretsMatch(presented, key);
 }
 
 /**
@@ -28,8 +34,6 @@ export function adminNotFound(): NextResponse {
  * createAdminSessionToken — a cookie equal to ADMIN_SECRET is rejected.
  */
 export async function verifyAdminRequest(req: Request): Promise<boolean> {
-  if (!isLocalAdminEnabled()) return false;
-
   const secret = process.env.ADMIN_SECRET?.trim();
   if (!secret) {
     return (
@@ -67,7 +71,6 @@ export async function createAdminSessionToken(
 }
 
 export function adminUnauthorized(): NextResponse {
-  if (!isLocalAdminEnabled()) return adminNotFound();
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 }
 

@@ -4,10 +4,13 @@ import {
   adminSecretsMatch,
   attachAdminSessionCookie,
   clearAdminSessionCookie,
-  isLocalAdminEnabled,
   verifyAdminRequest,
 } from "@/lib/admin/auth";
 import { consumeRateLimit } from "@/lib/api/rate-limit";
+
+function isLocalAdminEnabled(): boolean {
+  return process.env.NODE_ENV !== "production";
+}
 
 /**
  * GET /api/admin/session — check admin session.

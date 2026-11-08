@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { adminFetch } from "@/lib/admin/client";
 
 /**
- * Unlock form for the local dev server.
- * Wrong password shows a clear error. Production does not serve this page.
+ * Unlock form. Production only renders this after the bookmark key matches.
+ * Wrong password shows a clear error.
  */
 export function AdminUnlockScreen() {
   const router = useRouter();

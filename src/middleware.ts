@@ -1,9 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { ADMIN_UNLOCK_PATH } from "@/lib/admin/constants";
 
 /**
- * Admin exists only on the local dev server (`npm run dev`).
- * Production always answers 404 for the screen, the unlock page, and the APIs.
- * Each API still calls verifyAdminRequest, which also refuses production.
+ * Development passes through. The password cookie is checked by each admin route.
+ *
+ * Production lets /admin and /api/admin reach the route. The route returns 404
+ * unless the Google account and a fresh passkey signature both pass.
+ * /api/admin/session and the unlock page still pass here first. The unlock page
+ * itself returns 404 unless ?k= matches ADMIN_UNLOCK_KEY.
  */
 export async function middleware(req: NextRequest) {
   if (process.env.NODE_ENV !== "production") {
@@ -11,14 +15,24 @@ export async function middleware(req: NextRequest) {
   }
 
   const { pathname } = req.nextUrl;
-  if (pathname.startsWith("/api/admin")) {
-    return NextResponse.json({ error: "Not Found" }, { status: 404 });
+
+  if (
+    pathname === "/api/admin/session" ||
+    pathname === ADMIN_UNLOCK_PATH ||
+    pathname.startsWith(`${ADMIN_UNLOCK_PATH}/`)
+  ) {
+    return NextResponse.next();
   }
 
-  return new NextResponse("Not Found", {
-    status: 404,
-    headers: { "content-type": "text/plain; charset=utf-8" },
-  });
+  if (pathname === "/admin" || pathname.startsWith("/admin/")) {
+    return NextResponse.next();
+  }
+
+  if (pathname.startsWith("/api/admin")) {
+    return NextResponse.next();
+  }
+
+  return NextResponse.next();
 }
 
 export const config = {

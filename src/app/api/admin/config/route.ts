@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { adminUnauthorized, verifyAdminRequest } from "@/lib/admin/auth";
+import { authorizeAdminRequest } from "@/lib/admin/gate";
 import {
   getFeedConfig,
   resetFeedConfig,
@@ -8,7 +8,8 @@ import {
 } from "@/lib/feed/config";
 
 export async function GET(req: NextRequest) {
-  if (!(await verifyAdminRequest(req))) return adminUnauthorized();
+  const denied = await authorizeAdminRequest(req);
+  if (denied) return denied;
   return NextResponse.json({ config: getFeedConfig() });
 }
 
@@ -27,7 +28,8 @@ const ConfigSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  if (!(await verifyAdminRequest(req))) return adminUnauthorized();
+  const denied = await authorizeAdminRequest(req);
+  if (denied) return denied;
 
   let body: unknown;
   try {
