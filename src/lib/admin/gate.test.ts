@@ -1,6 +1,6 @@
 import { describe, expect, it, afterEach, vi } from "vitest";
 import { authorizeAdminRequest } from "@/lib/admin/gate";
-import { isAdminGoogleUser } from "@/lib/admin/google-user";
+import { isAdminGoogleUser, loginClaimsFromAccessToken } from "@/lib/admin/google-user";
 import { createMemoryChallengeStore } from "@/lib/admin/passkey-challenge";
 import { verifyPasskeyAssertion } from "@/lib/admin/passkey";
 import { adminPasskeyRelyingParty } from "@/lib/admin/passkey-rp";
@@ -8,21 +8,51 @@ import { operationNeedsPasskey } from "@/lib/admin/client";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 
 describe("isAdminGoogleUser", () => {
-  it("accepts only the env email with provider google", () => {
+  it("accepts the env email when this session signed in with Google", () => {
     const user = {
       email: "Admin@Example.com",
-      app_metadata: { provider: "google" },
+      app_metadata: { provider: "google", providers: ["google"] },
     };
-    expect(isAdminGoogleUser(user, "admin@example.com")).toBe(true);
-    expect(isAdminGoogleUser(user, "other@example.com")).toBe(false);
+    const googleLogin = { methods: ["oauth"] };
+    expect(isAdminGoogleUser(user, "admin@example.com", googleLogin)).toBe(true);
+    expect(isAdminGoogleUser(user, "other@example.com", googleLogin)).toBe(false);
     expect(
       isAdminGoogleUser(
-        { email: "admin@example.com", app_metadata: { provider: "email" } },
+        {
+          email: "admin@example.com",
+          app_metadata: { provider: "email", providers: ["email", "google"] },
+        },
         "admin@example.com",
+        googleLogin,
+      ),
+    ).toBe(true);
+    expect(
+      isAdminGoogleUser(
+        {
+          email: "admin@example.com",
+          app_metadata: { provider: "email", providers: ["email", "google"] },
+        },
+        "admin@example.com",
+        { methods: ["magiclink"] },
+      ),
+    ).toBe(false);
+    expect(
+      isAdminGoogleUser(
+        { email: "admin@example.com", app_metadata: { provider: "email", providers: ["email"] } },
+        "admin@example.com",
+        googleLogin,
       ),
     ).toBe(false);
     expect(isAdminGoogleUser(user, "")).toBe(false);
     expect(isAdminGoogleUser(null, "admin@example.com")).toBe(false);
+  });
+
+  it("reads the sign-in method from the access token", () => {
+    const payload = Buffer.from(
+      JSON.stringify({ amr: [{ method: "oauth", timestamp: 1 }] }),
+    ).toString("base64url");
+    expect(loginClaimsFromAccessToken(`aa.${payload}.sig`)).toEqual({ methods: ["oauth"] });
+    expect(loginClaimsFromAccessToken("not-a-token")).toBeNull();
   });
 });
 

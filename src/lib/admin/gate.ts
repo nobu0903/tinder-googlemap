@@ -19,8 +19,8 @@ const defaultDeps: AdminGateDeps = {
 /**
  * Development keeps the signed cookie and x-admin-secret.
  * Production ignores both. A request is allowed only when getUser matches
- * ADMIN_GOOGLE_EMAIL with provider google, and this request's passkey
- * signature verifies. Failure in production is 404.
+ * ADMIN_GOOGLE_EMAIL, Google is linked, this session signed in with Google,
+ * and this request's passkey signature verifies. Failure in production is 404.
  */
 export async function authorizeAdminRequest(
   req: Request,
