@@ -1,4 +1,5 @@
-const PRODUCTION_ORIGIN = "https://meshidoko.com";
+/** Vercel sends meshidoko.com to www. The passkey records the page that created it. */
+const PRODUCTION_ORIGIN = "https://www.meshidoko.com";
 
 export function adminPasskeyRelyingParty(env: {
   NODE_ENV?: string;

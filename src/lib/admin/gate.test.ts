@@ -65,8 +65,8 @@ describe("adminPasskeyRelyingParty", () => {
       }),
     ).toEqual({ rpID: "evil.example", origin: "https://evil.example" });
     expect(adminPasskeyRelyingParty({ NODE_ENV: "production" })).toEqual({
-      rpID: "meshidoko.com",
-      origin: "https://meshidoko.com",
+      rpID: "www.meshidoko.com",
+      origin: "https://www.meshidoko.com",
     });
   });
 });
