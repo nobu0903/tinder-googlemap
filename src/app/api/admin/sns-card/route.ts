@@ -8,7 +8,8 @@ const BodySchema = z.object({
 });
 
 /**
- * POST /api/admin/sns-card — resolve google.com/maps/place/... → FeedSpot
+ * POST /api/admin/sns-card — resolve a Maps place URL, or a maps.app.goo.gl
+ * link that opens one, into a FeedSpot.
  * for screenshot-ready swipe cards on the admin page.
  */
 export async function POST(req: NextRequest) {

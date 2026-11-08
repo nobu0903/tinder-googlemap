@@ -1,6 +1,7 @@
 /**
  * Parse google.com/maps/place/... URLs into Place ID / name / coords.
- * Short links (maps.app.goo.gl) are intentionally unsupported.
+ * Short links are expanded before this parser runs. This function still
+ * rejects them, because the place id is not in the short link itself.
  */
 
 export interface ParsedMapsPlaceUrl {

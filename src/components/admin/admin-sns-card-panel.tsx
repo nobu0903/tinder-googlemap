@@ -83,8 +83,8 @@ export function AdminSnsCardPanel() {
         <p className="mb-3 text-[11px] leading-relaxed text-neutral-500">
           Google Maps の{" "}
           <code className="text-neutral-400">google.com/maps/place/...</code>{" "}
-          を貼ると、本番と同じスワイプ画面（全画面）が開きます。スクショして X
-          に投稿できます。短縮 URL は非対応です。
+          か、<code className="text-neutral-400">maps.app.goo.gl/...</code>{" "}
+          を貼ると、本番と同じスワイプ画面（全画面）が開きます。短縮リンクは、開いた先が店のページのときだけ使えます。
         </p>
 
         <form
@@ -99,7 +99,7 @@ export function AdminSnsCardPanel() {
             <input
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://www.google.com/maps/place/..."
+              placeholder="https://maps.app.goo.gl/... または https://www.google.com/maps/place/..."
               className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 font-mono text-sm text-neutral-200"
             />
           </label>

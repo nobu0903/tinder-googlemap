@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase/server";
+import { expandMapsPlaceUrl } from "@/lib/geo/expand-maps-url";
 import { parseGoogleMapsPlaceUrl } from "@/lib/geo/maps-place-url";
 import { DETAILS_FULL_FIELD_MASK } from "@/lib/places/enrichment-gate";
 import { mapPlaceToRow } from "@/lib/places/ingest";
@@ -98,10 +99,11 @@ export async function resolveSnsCardFromMapsUrl(
   placeId: string;
   source: "cache" | "details" | "search";
 }> {
-  const parsed = parseGoogleMapsPlaceUrl(mapsUrl);
+  const mapsPage = await expandMapsPlaceUrl(mapsUrl);
+  const parsed = parseGoogleMapsPlaceUrl(mapsPage);
   if (!parsed) {
     throw new Error(
-      "Invalid URL. Use a google.com/maps/place/... link (short links not supported).",
+      "Invalid URL. Use a google.com/maps/place/... link, or a maps.app.goo.gl link that opens one.",
     );
   }
 
