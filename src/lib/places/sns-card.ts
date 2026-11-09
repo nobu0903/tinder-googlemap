@@ -1,6 +1,9 @@
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { expandMapsPlaceUrl } from "@/lib/geo/expand-maps-url";
-import { parseGoogleMapsPlaceUrl } from "@/lib/geo/maps-place-url";
+import {
+  isSpecificMapsAddress,
+  parseGoogleMapsPlaceUrl,
+} from "@/lib/geo/maps-place-url";
 import { DETAILS_FULL_FIELD_MASK } from "@/lib/places/enrichment-gate";
 import { mapPlaceToRow } from "@/lib/places/ingest";
 import { rowToFeedSpot } from "@/lib/places/format";
@@ -73,6 +76,37 @@ async function findPlaceIdByNameNear(
   return data.places?.[0]?.id ?? null;
 }
 
+/** App links name the shop by postal address and do not include coordinates. */
+async function findPlaceIdByAddress(address: string): Promise<string | null> {
+  const postal = address.match(/\d{3}-\d{4}/)?.[0];
+  if (!postal) return null;
+  const res = await fetch(`${GOOGLE_PLACES_BASE}/places:searchText`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": getApiKey(),
+      "X-Goog-FieldMask": "places.id,places.formattedAddress",
+    },
+    body: JSON.stringify({
+      textQuery: address,
+      languageCode: "ja",
+      maxResultCount: 3,
+    }),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    console.warn(`[sns-card] address search failed: ${res.status}`);
+    return null;
+  }
+  const data = (await res.json()) as {
+    places?: { id?: string; formattedAddress?: string }[];
+  };
+  const match = (data.places ?? []).find((place) =>
+    (place.formattedAddress ?? "").includes(postal),
+  );
+  return match?.id ?? null;
+}
+
 async function loadCachedRow(placeId: string): Promise<SpotRow | null> {
   const { data, error } = await supabaseAdmin
     .from("spots")
@@ -111,19 +145,19 @@ export async function resolveSnsCardFromMapsUrl(
   let source: "cache" | "details" | "search" = "details";
 
   if (!placeId) {
-    if (!parsed.name || parsed.lat == null || parsed.lng == null) {
+    if (!parsed.name) {
       throw new Error(
         "Could not find Place ID in the URL. Open the place on Google Maps and copy the full place link.",
       );
     }
-    placeId = await findPlaceIdByNameNear(
-      parsed.name,
-      parsed.lat,
-      parsed.lng,
-    );
+    if (parsed.lat != null && parsed.lng != null) {
+      placeId = await findPlaceIdByNameNear(parsed.name, parsed.lat, parsed.lng);
+    } else if (isSpecificMapsAddress(parsed.name)) {
+      placeId = await findPlaceIdByAddress(parsed.name);
+    }
     if (!placeId) {
       throw new Error(
-        `No place found for “${parsed.name}” near the URL coordinates.`,
+        "Could not find Place ID in the URL. Open the place on Google Maps and copy the full place link.",
       );
     }
     source = "search";

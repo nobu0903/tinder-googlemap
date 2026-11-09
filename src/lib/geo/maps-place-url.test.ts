@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { parseGoogleMapsPlaceUrl } from "@/lib/geo/maps-place-url";
+import {
+  isSpecificMapsAddress,
+  parseGoogleMapsPlaceUrl,
+} from "@/lib/geo/maps-place-url";
 
 describe("parseGoogleMapsPlaceUrl", () => {
   it("extracts ChIJ place id, name, and @coords", () => {
@@ -50,6 +53,16 @@ describe("parseGoogleMapsPlaceUrl", () => {
       "https://www.google.com/maps/place/data=!4m2!3m1!1sChIJk6jaYkMvC18Rqtff7aLGDL0",
     );
     expect(parsed?.placeId).toBe("ChIJk6jaYkMvC18Rqtff7aLGDL0");
+  });
+
+  it("reads the postal address from an app short-link landing page", () => {
+    const url =
+      "https://www.google.com/maps/place/%E6%97%A5%E6%9C%AC%E3%80%81%E3%80%92210-0006+%E7%A5%9E%E5%A5%88%E5%B7%9D%E7%9C%8C%E5%B7%9D%E5%B4%8E%E5%B8%82/data=!4m2!3m1!1s0x601861ec26c491eb:0xa8eb155441916e98!18m1!1e1";
+    const parsed = parseGoogleMapsPlaceUrl(url);
+    expect(parsed?.placeId).toBeNull();
+    expect(parsed?.name).toContain("210-0006");
+    expect(parsed?.lat).toBeNull();
+    expect(isSpecificMapsAddress(parsed?.name ?? "")).toBe(true);
   });
 
   it("rejects non-place hosts and short links", () => {

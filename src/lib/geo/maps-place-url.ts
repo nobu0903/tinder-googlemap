@@ -28,6 +28,11 @@ function placeIdIn(value: string | null | undefined): string | null {
   return value?.match(PLACE_ID_RE)?.[0] ?? null;
 }
 
+/** App share links often carry a postal address instead of a ChIJ place id. */
+export function isSpecificMapsAddress(name: string): boolean {
+  return /\d{3}-\d{4}/.test(name);
+}
+
 export interface ParsedMapsPlaceUrl {
   placeId: string | null;
   name: string | null;
