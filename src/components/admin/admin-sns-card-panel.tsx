@@ -81,10 +81,12 @@ export function AdminSnsCardPanel() {
           SNS card (screenshot)
         </h2>
         <p className="mb-3 text-[11px] leading-relaxed text-neutral-500">
-          Google Maps の{" "}
+          ブラウザの{" "}
           <code className="text-neutral-400">google.com/maps/place/...</code>{" "}
-          か、<code className="text-neutral-400">maps.app.goo.gl/...</code>{" "}
-          を貼ると、本番と同じスワイプ画面（全画面）が開きます。短縮リンクは、開いた先が店のページのときだけ使えます。
+          と、アプリの共有リンク（
+          <code className="text-neutral-400">maps.app.goo.gl</code>
+          、<code className="text-neutral-400">google.co.jp</code>
+          、店の ID 付きの検索リンク）を貼れます。店のページに着いたときだけ開きます。
         </p>
 
         <form

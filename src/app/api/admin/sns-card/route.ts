@@ -4,7 +4,7 @@ import { authorizeAdminRequest } from "@/lib/admin/gate";
 import { resolveSnsCardFromMapsUrl } from "@/lib/places/sns-card";
 
 const BodySchema = z.object({
-  url: z.string().url().max(4000),
+  url: z.string().trim().min(1).max(4000),
 });
 
 /**

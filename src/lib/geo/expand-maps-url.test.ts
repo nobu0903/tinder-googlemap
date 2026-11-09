@@ -29,6 +29,22 @@ describe("expandMapsPlaceUrl", () => {
     expect(requestHop).not.toHaveBeenCalled();
   });
 
+  it("follows a cid link from the app to the place page", async () => {
+    const { requestHop, seen } = hops([PLACE]);
+    await expect(
+      expandMapsPlaceUrl("https://maps.google.com/?cid=12345678901234", requestHop),
+    ).resolves.toBe(PLACE);
+    expect(seen).toEqual(["https://maps.google.com/?cid=12345678901234"]);
+  });
+
+  it("follows the link inside an app share that also contains the shop name", async () => {
+    const { requestHop } = hops([PLACE]);
+    await expect(
+      expandMapsPlaceUrl("https://maps.app.goo.gl/abcdef\n麺屋", requestHop),
+    ).resolves.toBe(PLACE);
+    expect(requestHop).toHaveBeenCalledTimes(1);
+  });
+
   it("follows a maps.app.goo.gl link to the place page", async () => {
     const { requestHop, seen } = hops([PLACE]);
     await expect(expandMapsPlaceUrl("https://maps.app.goo.gl/abcdef", requestHop)).resolves.toBe(

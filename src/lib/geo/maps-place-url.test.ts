@@ -13,11 +13,33 @@ describe("parseGoogleMapsPlaceUrl", () => {
     expect(parsed!.lng).toBeCloseTo(139.7016359, 5);
   });
 
-  it("reads query_place_id", () => {
+  it("reads the place id from a Maps app search link", () => {
     const url =
       "https://www.google.com/maps/search/?api=1&query=Test&query_place_id=ChIJk6jaYkMvC18Rqtff7aLGDL0";
-    // /maps/search is not /maps/place — should reject
-    expect(parseGoogleMapsPlaceUrl(url)).toBeNull();
+    const parsed = parseGoogleMapsPlaceUrl(url);
+    expect(parsed?.placeId).toBe("ChIJk6jaYkMvC18Rqtff7aLGDL0");
+    expect(parsed?.name).toBe("Test");
+  });
+
+  it("rejects a search link that has no place id", () => {
+    expect(
+      parseGoogleMapsPlaceUrl("https://www.google.com/maps/search/?api=1&query=Test"),
+    ).toBeNull();
+  });
+
+  it("reads a google.co.jp place page from the app", () => {
+    const url =
+      "https://www.google.co.jp/maps/place/%E9%BA%BA%E5%B1%8B/@35.66,139.70,17z/data=!4m2!3m1!1sChIJk6jaYkMvC18Rqtff7aLGDL0";
+    const parsed = parseGoogleMapsPlaceUrl(url);
+    expect(parsed?.placeId).toBe("ChIJk6jaYkMvC18Rqtff7aLGDL0");
+    expect(parsed?.name).toBe("麺屋");
+  });
+
+  it("reads the app scheme when it names a place id", () => {
+    const parsed = parseGoogleMapsPlaceUrl(
+      "comgooglemaps://?q=place_id:ChIJk6jaYkMvC18Rqtff7aLGDL0",
+    );
+    expect(parsed?.placeId).toBe("ChIJk6jaYkMvC18Rqtff7aLGDL0");
   });
 
   it("accepts /maps/place with query_place_id", () => {

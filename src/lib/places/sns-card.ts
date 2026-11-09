@@ -103,7 +103,7 @@ export async function resolveSnsCardFromMapsUrl(
   const parsed = parseGoogleMapsPlaceUrl(mapsPage);
   if (!parsed) {
     throw new Error(
-      "Invalid URL. Use a google.com/maps/place/... link, or a maps.app.goo.gl link that opens one.",
+      "Invalid URL. Paste a Google Maps place link from the website or the app.",
     );
   }
 

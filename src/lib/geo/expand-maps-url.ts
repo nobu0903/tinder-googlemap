@@ -1,5 +1,5 @@
 import https from "node:https";
-import { parseGoogleMapsPlaceUrl } from "@/lib/geo/maps-place-url";
+import { normalizeMapsAppUrl, parseGoogleMapsPlaceUrl } from "@/lib/geo/maps-place-url";
 
 const MAX_HOPS = 4;
 const HOP_TIMEOUT_MS = 8000;
@@ -40,6 +40,19 @@ function isGoogleMapsWebHost(hostname: string): boolean {
   );
 }
 
+/** App shares sometimes use ?cid= instead of a place page. The redirect carries the place. */
+export function isCidMapsUrl(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return false;
+  }
+  if (!isSafeHttps(url) || !isGoogleMapsWebHost(hostnameOf(url))) return false;
+  const cid = url.searchParams.get("cid");
+  return !!cid && /^\d{10,20}$/.test(cid);
+}
+
 /** True only for the short links this admin field may open. */
 export function isMapsShortUrl(raw: string): boolean {
   let url: URL;
@@ -60,7 +73,8 @@ function assertAllowedHop(url: URL): void {
   if (!isSafeHttps(url)) throw new Error(SHORT_LINK_ERROR);
   const hostname = hostnameOf(url);
   if (isShortMapsHost(hostname) || isLegacyMapsShortPath(url)) return;
-  if (isGoogleMapsWebHost(hostname) && url.pathname.includes("/maps")) return;
+  if (!isGoogleMapsWebHost(hostname)) throw new Error(NOT_A_PLACE_ERROR);
+  if (url.pathname.includes("/maps") || isCidMapsUrl(url.toString())) return;
   throw new Error(NOT_A_PLACE_ERROR);
 }
 
@@ -88,16 +102,16 @@ function defaultHop(url: URL, signal: AbortSignal): Promise<MapsHop> {
 }
 
 /**
- * Leave a full place URL untouched. Open only maps.app.goo.gl or goo.gl/maps,
- * and only while each hop stays on Google Maps.
+ * Leave a place URL untouched. Open a short link or a cid link, and only
+ * while each hop stays on Google Maps.
  */
 export async function expandMapsPlaceUrl(
   raw: string,
   requestHop: (url: URL, signal: AbortSignal) => Promise<MapsHop> = defaultHop,
 ): Promise<string> {
-  const trimmed = raw.trim();
+  const trimmed = normalizeMapsAppUrl(raw);
   if (parseGoogleMapsPlaceUrl(trimmed)) return trimmed;
-  if (!isMapsShortUrl(trimmed)) return trimmed;
+  if (!isMapsShortUrl(trimmed) && !isCidMapsUrl(trimmed)) return trimmed;
 
   let current = new URL(trimmed);
   for (let hop = 0; hop < MAX_HOPS; hop += 1) {
