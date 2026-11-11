@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/69c21825-52ca-4ac0-b62e-3af16f933599
+
 # Meshidoko (メシどこ)
 
 Meshidoko is a web app for finding nearby restaurants by swiping cards left or right. Place data comes from Google Places, and restaurants you like can be saved to a Google account.
